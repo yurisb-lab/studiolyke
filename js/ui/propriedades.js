@@ -2,6 +2,7 @@
 
 import { IMPRESSORA } from '../config.js';
 import { formatarMB, formatarNumero, formatarTriangulos } from '../core/memoria.js';
+import { corDoFilamento, filamentoDaParte, numFilamentos, rotuloFilamento, NOMES_SUBTIPO } from '../core/projeto.js';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -19,11 +20,6 @@ export function renderizarModelo(el, estado) {
   const cabeNaMesa = (t) => t[0] <= IMPRESSORA.mesaX && t[1] <= IMPRESSORA.mesaY && t[2] <= IMPRESSORA.alturaMax;
   const cabe = cabeNaMesa(c.tamanho);
   const grandes = m.objetos.filter((o) => o.tamanho && !cabeNaMesa(o.tamanho));
-  const objetos = m.objetos.slice(0, 50).map((o) => {
-    const medidas = o.tamanho ? `<span class="nota">${o.tamanho.map((v) => Math.round(v)).join(' × ')} mm</span>` : '';
-    return `<li><span>${esc(o.nome)} ${medidas}</span><span class="num">${formatarTriangulos(o.numTriangulos)}</span></li>`;
-  }).join('');
-  const maisObjetos = m.objetos.length > 50 ? `<li class="mais">e mais ${m.objetos.length - 50}…</li>` : '';
   const avisos = m.avisos.length
     ? `<ul class="lista-avisos">${m.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`
     : '';
@@ -45,10 +41,87 @@ export function renderizarModelo(el, estado) {
       ${m.trianguloOriginal && m.trianguloOriginal !== tri ? `<dt>Original</dt><dd>${formatarNumero(m.trianguloOriginal)} <span class="nota">(simplificado ao abrir)</span></dd>` : ''}
     </dl>
     <p>${situacaoMesa}</p>
-    <h3>Objetos (${m.objetos.length})</h3>
-    <ul class="lista-objetos">${objetos}${maisObjetos}</ul>
+    ${htmlFilamentos(m)}
+    ${htmlPlacas(m)}
     ${avisos}
   `;
+}
+
+const MAX_OBJETOS = 200;
+
+function bolinha(cor) {
+  return `<span class="bolinha" style="background:${esc(cor)}" aria-hidden="true"></span>`;
+}
+
+function htmlFilamentos(m) {
+  if (!m.filamentos.length) {
+    return '<h3>Filamentos</h3><p class="nota">Este arquivo não diz quais filamentos usar: as cores na tela são só de exemplo. No Bambu Studio vale o filamento de cada slot do AMS.</p>';
+  }
+  const itens = m.filamentos.map((f, i) => `
+    <li data-filamento="${i + 1}">${bolinha(corDoFilamento(m, i + 1))}
+      <span class="fil-num">${i + 1}</span>
+      <span class="fil-nome">${esc(f.tipo || 'Filamento')} <span class="nota">${esc(f.cor.toUpperCase())}</span></span>
+      ${f.perfil ? `<span class="nota fil-perfil">${esc(f.perfil.replace(/ @BBL.*$/, ''))}</span>` : ''}
+    </li>`).join('');
+  return `<h3>Filamentos (${m.filamentos.length})</h3><ul class="lista-filamentos" id="lista-filamentos">${itens}</ul>`;
+}
+
+/** Seletor de filamento de uma parte. */
+function seletor(m, io, ip, nomeParte) {
+  const o = m.objetos[io];
+  const p = o.partes[ip];
+  const atual = filamentoDaParte(p, o);
+  const n = numFilamentos(m);
+  let opcoes = '';
+  for (let k = 1; k <= n; k++) opcoes += `<option value="${k}"${k === atual ? ' selected' : ''}>${esc(rotuloFilamento(m, k))}</option>`;
+  return `<label class="filamento-parte">${bolinha(corDoFilamento(m, atual))}
+    <select class="seletor-filamento" data-objeto="${io}" data-parte="${ip}" aria-label="Filamento de ${esc(nomeParte)}">${opcoes}</select></label>`;
+}
+
+function htmlObjeto(m, io) {
+  const o = m.objetos[io];
+  const medidas = o.tamanho ? `<span class="nota">${o.tamanho.map((v) => Math.round(v)).join(' × ')} mm</span>` : '';
+  const fora = o.imprimivel === false ? ' <span class="nota">(não imprime)</span>' : '';
+  const normais = o.partes.length;
+  if (normais === 1) {
+    return `<li class="objeto" data-objeto="${io}">
+      <div class="linha"><span class="nome">${esc(o.nome)}${fora} ${medidas}</span>${seletor(m, io, 0, o.nome)}</div>
+    </li>`;
+  }
+  const partes = o.partes.map((p, ip) => {
+    const tipo = p.subtipo && p.subtipo !== 'normal_part' ? ` <span class="nota">(${esc(NOMES_SUBTIPO[p.subtipo] || p.subtipo)})</span>` : '';
+    return `<li class="parte"><span class="nome">${esc(p.nome)}${tipo}</span>${seletor(m, io, ip, p.nome)}</li>`;
+  }).join('');
+  return `<li class="objeto" data-objeto="${io}">
+    <div class="linha"><span class="nome">${esc(o.nome)}${fora} ${medidas}</span><span class="num">${o.partes.length} partes</span></div>
+    <ul class="lista-partes">${partes}</ul>
+  </li>`;
+}
+
+function htmlPlacas(m) {
+  let mostrados = 0;
+  const lista = (indices) => {
+    let html = '';
+    for (const io of indices) {
+      if (mostrados >= MAX_OBJETOS) break;
+      html += htmlObjeto(m, io);
+      mostrados++;
+    }
+    return html;
+  };
+  const naPlaca = new Set(m.placas.flatMap((p) => p.objetos));
+  const fora = m.objetos.map((_, i) => i).filter((i) => !naPlaca.has(i));
+  let html = `<h3>${m.placas.length > 1 ? `Placas (${m.placas.length})` : 'Placa'} · ${m.objetos.length} objeto${m.objetos.length > 1 ? 's' : ''}</h3>`;
+  for (const [ip, pl] of m.placas.entries()) {
+    const titulo = `Placa ${pl.id || ip + 1}${pl.nome ? ` · ${esc(pl.nome)}` : ''}${pl.bloqueada ? ' <span class="nota">(travada)</span>' : ''}`;
+    html += `<div class="placa" data-placa="${ip}"><h4>${titulo} <span class="nota">${pl.objetos.length} objeto${pl.objetos.length === 1 ? '' : 's'}</span></h4>
+      <ul class="lista-objetos">${lista(pl.objetos)}</ul></div>`;
+  }
+  if (fora.length) {
+    html += `<div class="placa"><h4>Fora das placas <span class="nota">${fora.length}</span></h4><ul class="lista-objetos">${lista(fora)}</ul></div>`;
+  }
+  if (m.objetos.length > mostrados) html += `<p class="nota">e mais ${m.objetos.length - mostrados} objetos…</p>`;
+  return html;
 }
 
 const NOMES_NIVEL = { forte: 'Forte', medio: 'Médio', fraco: 'Fraco' };

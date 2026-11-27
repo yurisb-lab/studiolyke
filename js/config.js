@@ -1,7 +1,7 @@
 // Configurações gerais do Fatiador L.Y.K.E 3D.
 // Nenhum segredo fica aqui (nem em lugar nenhum do código).
 
-export const VERSAO = 'v0.0.1';
+export const VERSAO = 'v0.0.2';
 
 // Bibliotecas pelo CDN, sempre com versão fixa.
 // O importmap do index.html usa os mesmos endereços; os Web Workers não enxergam
@@ -16,6 +16,10 @@ export const CDN = {
 // Google Drive (para depois): ID de cliente OAuth com escopo drive.file.
 // Fica vazio até o Drive ser ligado. Não é segredo, mas também não é senha.
 export const GOOGLE_CLIENT_ID = '';
+
+// Versão do Bambu Studio gravada nos 3MF exportados (a mesma do PC do Yuri).
+// Se o arquivo aberto já veio de um Bambu Studio, a versão dele é mantida.
+export const BAMBU_APLICACAO = 'BambuStudio-02.08.02.61';
 
 // Impressora padrão (mm).
 export const IMPRESSORA = {

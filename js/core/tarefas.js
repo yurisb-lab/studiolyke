@@ -4,7 +4,7 @@
 let proximoId = 1;
 
 /**
- * @param {string} tipo  'abrir' | 'tela'
+ * @param {string} tipo  'abrir' | 'tela' | 'exportar'
  * @param {object} dados
  * @param {Transferable[]} transferir
  * @param {(fase:string, fracao:number)=>void} [aoProgresso]

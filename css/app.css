@@ -225,6 +225,61 @@ h3 {
 .lista-objetos li span:first-child { overflow-wrap: anywhere; }
 .lista-objetos .num { color: var(--texto-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lista-avisos { margin-top: 12px; }
+
+/* filamentos, placas, objetos e partes */
+.ferramenta + .ferramenta { margin-top: 8px; }
+.ferramenta:disabled, .barra-inferior button:disabled { opacity: .45; cursor: not-allowed; }
+.bolinha {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgb(255 255 255 / .35);
+  vertical-align: -2px;
+}
+.lista-filamentos { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.lista-filamentos li {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 5px 0;
+}
+.lista-filamentos .fil-num { font-weight: 650; font-variant-numeric: tabular-nums; }
+.lista-filamentos .fil-perfil { grid-column: 3; }
+.placa { margin-top: 12px; }
+.placa h4 {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--painel-2);
+  font-size: 13px;
+  font-weight: 650;
+}
+.lista-objetos li.objeto { display: block; padding: 4px 0; }
+.lista-objetos .linha, .lista-partes li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lista-objetos .nome { min-width: 0; overflow-wrap: anywhere; }
+.lista-partes { list-style: none; margin: 2px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--borda); }
+.lista-partes li { padding: 2px 0; border: 0; }
+.filamento-parte { display: flex; align-items: center; gap: 6px; flex: none; }
+.seletor-filamento {
+  min-height: var(--toque);
+  min-width: 76px;
+  padding: 0 8px;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  background: var(--painel-2);
+  color: var(--texto);
+  font: inherit;
+  font-size: 14px;
+}
+.seletor-filamento:focus-visible { outline: 2px solid var(--destaque); }
 .lista-avisos li {
   padding: 8px 10px;
   margin-top: 6px;
@@ -400,6 +455,7 @@ h3 {
   font-size: 14px;
 }
 .aviso-rapido.aviso { border-color: color-mix(in srgb, var(--atencao) 50%, var(--borda)); }
+.aviso-rapido.ok { border-color: color-mix(in srgb, var(--ok) 55%, var(--borda)); }
 .aviso-rapido.erro { border-color: color-mix(in srgb, var(--perigo) 60%, var(--borda)); background: #2e2124; }
 .fechar-aviso {
   margin-left: auto;
@@ -489,7 +545,7 @@ h3 {
   .barra-inferior {
     grid-area: barra;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     padding-bottom: var(--seguro-baixo);
     background: var(--painel);
     border-top: 1px solid var(--borda);

@@ -151,6 +151,104 @@ export async function bambu3mf() {
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
+function malhaXmlPintada({ posicoes, indices }, pinturas) {
+  let s = '<mesh><vertices>';
+  for (let i = 0; i < posicoes.length; i += 3) s += `<vertex x="${posicoes[i]}" y="${posicoes[i + 1]}" z="${posicoes[i + 2]}"/>`;
+  s += '</vertices><triangles>';
+  for (let t = 0; t < indices.length; t += 3) {
+    const extra = pinturas[(t / 3) % pinturas.length] || '';
+    s += `<triangle v1="${indices[t]}" v2="${indices[t + 1]}" v3="${indices[t + 2]}"${extra}/>`;
+  }
+  return s + '</triangles></mesh>';
+}
+
+// Pinturas de exemplo (formato do Bambu: árvore de subdivisão em hexadecimal).
+export const PINTURAS_EXEMPLO = ['', ' paint_color="4"', ' paint_color="0C" paint_supports="8"', ' paint_color="3C30C0"', ''];
+
+/**
+ * Projeto completo do Bambu Studio para testar a ida e volta:
+ *   - 4 filamentos (project_settings.config)
+ *   - "Boneco": 3 partes (corpo pintado no filamento 1, olho no 3 deslocado, modificador)
+ *   - "Peça espelhada": espelhada e girada, com 2 instâncias, filamento 2, na placa 2
+ *   - "Etiqueta": não imprime
+ *   - arquivos que voltam iguais (miniatura, G-code por camada) e que saem (G-code, slice_info)
+ * Usa o arranjo "production" (3D/Objects/object_1.model), como o Bambu grava.
+ */
+export async function bambuProjeto3mf() {
+  const corpo = cubo(10);
+  const olho = esfera(3, 8, 12, [0, 0, 0]);
+  const mod = cubo(4, [3, 3, 3]);
+  const espelhada = cubo(6);
+  const etiqueta = cubo(2);
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="config" ContentType="text/xml"/></Types>');
+  zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/><Relationship Target="/Metadata/plate_1.png" Id="rel-2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail"/></Relationships>');
+  zip.file('3D/Objects/object_1.model', `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">
+ <resources>
+  <object id="1" type="model">${malhaXmlPintada(corpo, PINTURAS_EXEMPLO)}</object>
+  <object id="2" type="model">${malhaXml(olho)}</object>
+  <object id="3" type="model">${malhaXml(mod)}</object>
+  <object id="4" type="model">${malhaXmlPintada(espelhada, [' paint_color="8"', ''])}</object>
+  <object id="5" type="model">${malhaXml(etiqueta)}</object>
+ </resources>
+</model>`);
+  const p = 'p:path="/3D/Objects/object_1.model"';
+  zip.file('3D/3dmodel.model', `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p">
+ <metadata name="Application">BambuStudio-02.08.02.61</metadata>
+ <metadata name="BambuStudio:3mfVersion">1</metadata>
+ <metadata name="Title">Projeto de teste</metadata>
+ <resources>
+  <object id="10" type="model"><components>
+   <component ${p} objectid="1" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>
+   <component ${p} objectid="2" transform="1 0 0 0 1 0 0 0 1 5 0 10"/>
+   <component ${p} objectid="3" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>
+  </components></object>
+  <object id="11" type="model"><components><component ${p} objectid="4" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></components></object>
+  <object id="12" type="model"><components><component ${p} objectid="5" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></components></object>
+ </resources>
+ <build>
+  <item objectid="10" transform="1 0 0 0 1 0 0 0 1 128 128 0" printable="1"/>
+  <item objectid="11" transform="0 -1 0 -1 0 0 0 0 1 435.25 120.125 0" printable="1"/>
+  <item objectid="11" transform="0 -1 0 -1 0 0 0 0 1 455.75 130.5 0" printable="1"/>
+  <item objectid="12" transform="1 0 0 0 1 0 0 0 1 60 60 0" printable="0"/>
+ </build>
+</model>`);
+  const meta = (k, v) => `<metadata key="${k}" value="${v}"/>`;
+  const inst = (o, i, ident) => `<model_instance>${meta('object_id', o)}${meta('instance_id', i)}${meta('identify_id', ident)}</model_instance>`;
+  zip.file('Metadata/model_settings.config', `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="10">${meta('name', 'Boneco &amp; olho')}${meta('extruder', '1')}${meta('brim_type', 'outer_only')}
+    <part id="1" subtype="normal_part">${meta('name', 'Corpo')}${meta('matrix', '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')}${meta('extruder', '1')}</part>
+    <part id="2" subtype="normal_part">${meta('name', 'Olho')}${meta('matrix', '1 0 0 5 0 1 0 0 0 0 1 10 0 0 0 1')}${meta('extruder', '3')}</part>
+    <part id="3" subtype="modifier_part">${meta('name', 'Reforço')}${meta('matrix', '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')}${meta('wall_loops', '4')}</part>
+  </object>
+  <object id="11">${meta('name', 'Peça espelhada')}${meta('extruder', '2')}
+    <part id="4" subtype="normal_part">${meta('name', 'Peça espelhada')}${meta('matrix', '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')}${meta('extruder', '2')}</part>
+  </object>
+  <object id="12">${meta('name', 'Etiqueta')}${meta('extruder', '4')}
+    <part id="5" subtype="normal_part">${meta('name', 'Etiqueta')}${meta('matrix', '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')}${meta('extruder', '4')}</part>
+  </object>
+  <plate>${meta('plater_id', '1')}${meta('plater_name', 'Frente')}${meta('locked', 'false')}${meta('thumbnail_file', 'Metadata/plate_1.png')}${meta('gcode_file', 'Metadata/plate_1.gcode')}${meta('first_layer_print_sequence', '1 3')}${inst(10, 0, 100)}${inst(12, 0, 103)}</plate>
+  <plate>${meta('plater_id', '2')}${meta('plater_name', '')}${meta('locked', 'true')}${inst(11, 0, 101)}${inst(11, 1, 102)}</plate>
+  <assemble><assemble_item object_id="10" instance_id="0" transform="1 0 0 0 1 0 0 0 1 128 128 0" offset="0 0 0"/></assemble>
+</config>`);
+  zip.file('Metadata/project_settings.config', JSON.stringify({
+    filament_colour: ['#1A1A1A', '#1B2A6B', '#D9C49A', '#FFFFFF'],
+    filament_type: ['PLA', 'PLA', 'PETG', 'PLA'],
+    filament_settings_id: ['Bambu PLA Basic @BBL A1', 'Bambu PLA Basic @BBL A1', 'Bambu PETG HF @BBL A1', 'eSUN PLA+ @BBL A1'],
+    filament_vendor: ['Bambu Lab', 'Bambu Lab', 'Bambu Lab', 'eSUN'],
+    printer_model: 'Bambu Lab A1',
+  }, null, 4));
+  zip.file('Metadata/plate_1.png', Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
+  zip.file('Metadata/custom_gcode_per_layer.xml', '<?xml version="1.0" encoding="utf-8"?><custom_gcodes_per_layer><plate><plate_info id="1"/></plate></custom_gcodes_per_layer>');
+  zip.file('Metadata/layer_config_ranges.xml', '<?xml version="1.0" encoding="utf-8"?><objects><object id="1"/></objects>');
+  zip.file('Metadata/plate_1.gcode', '; G-code velho\nG28\n');
+  zip.file('Metadata/slice_info.config', '<?xml version="1.0"?><config/>');
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
 /** Grava os arquivos de teste em testes/gerados/ (só se ainda não existem). */
 export async function gerarTodos({ pesado = true } = {}) {
   mkdirSync(PASTA_GERADOS, { recursive: true });
@@ -164,6 +262,7 @@ export async function gerarTodos({ pesado = true } = {}) {
     cuboTexto: gravar('cubo-texto.stl', stlTexto(cubo(10))),
     cubosObj: gravar('cubos.obj', objCubos()),
     bambu: gravar('boneco-bambu.3mf', await bambu3mf()),
+    projeto: gravar('projeto-bambu.3mf', await bambuProjeto3mf()),
   };
   if (pesado) {
     // ~1 milhão de triângulos, ~50 MB: o "modelo pesado" do modo leve

@@ -124,3 +124,123 @@ export function desfazerEntidades(s) {
     return String.fromCodePoint(parseInt(e.slice(1), 10));
   });
 }
+
+// --- escrita ------------------------------------------------------------------
+
+const codificador = new TextEncoder();
+
+/**
+ * Escreve texto direto em bytes, em pedaços de tamanho fixo. Quando um pedaço
+ * enche, ele é entregue (aoEncher) e um novo começa: o arquivo inteiro nunca
+ * fica junto na memória.
+ */
+export class EscritorBytes {
+  constructor(aoEncher, tamanho = 1 << 20) {
+    this.aoEncher = aoEncher;
+    this.tamanho = tamanho;
+    this.buf = new Uint8Array(tamanho);
+    this.p = 0;
+    this.total = 0;
+  }
+
+  /** Garante espaço para n bytes no pedaço atual. */
+  espaco(n) {
+    if (this.p + n <= this.buf.length) return;
+    this.esvaziar();
+    if (n > this.buf.length) this.buf = new Uint8Array(n);
+  }
+
+  esvaziar() {
+    if (this.p === 0) return;
+    const pedaco = this.buf.subarray(0, this.p);
+    this.total += this.p;
+    this.aoEncher(pedaco);
+    this.buf = new Uint8Array(Math.max(this.tamanho, this.buf.length));
+    this.p = 0;
+  }
+
+  /** Texto qualquer (UTF-8). */
+  texto(s) {
+    let ascii = true;
+    for (let k = 0; k < s.length; k++) if (s.charCodeAt(k) > 127) { ascii = false; break; }
+    if (!ascii) {
+      this.bytes(codificador.encode(s));
+      return;
+    }
+    this.espaco(s.length);
+    const b = this.buf;
+    let p = this.p;
+    for (let k = 0; k < s.length; k++) b[p++] = s.charCodeAt(k);
+    this.p = p;
+  }
+
+  bytes(u8) {
+    this.espaco(u8.length);
+    this.buf.set(u8, this.p);
+    this.p += u8.length;
+  }
+
+  /** Inteiro sem sinal (índices de vértice). */
+  inteiro(v) {
+    this.espaco(12);
+    const b = this.buf;
+    if (v === 0) { b[this.p++] = 48; return; }
+    let p = this.p;
+    let ini = p;
+    while (v > 0) {
+      const q = Math.floor(v / 10);
+      b[p++] = 48 + (v - q * 10);
+      v = q;
+    }
+    this.p = p;
+    // os dígitos saíram ao contrário
+    for (let fimD = p - 1; ini < fimD; ini++, fimD--) { const t = b[ini]; b[ini] = b[fimD]; b[fimD] = t; }
+  }
+
+  /**
+   * Coordenada de vértice: o número mais curto que o Bambu Studio lê como o MESMO
+   * valor em precisão simples (é assim que ele guarda a malha). Assim a malha
+   * exportada fica idêntica à original lá dentro, sem casas sobrando.
+   */
+  coordenada(v) {
+    if (!Number.isFinite(v)) v = 0;
+    const alvo = Math.fround(v);
+    for (let casas = 0; casas <= 9; casas++) {
+      const f = POT10[casas];
+      const r = Math.round(v * f);
+      if (Math.fround(r / f) === alvo) {
+        this._fixo(r, casas);
+        return;
+      }
+    }
+    this.texto(String(alvo));
+  }
+
+  /** Escreve r / 10^casas sem zeros sobrando. */
+  _fixo(r, casas) {
+    this.espaco(32);
+    if (r === 0) { this.buf[this.p++] = 48; return; }
+    if (r < 0) { this.buf[this.p++] = 45; r = -r; }
+    while (casas > 0 && r % 10 === 0) { r /= 10; casas--; }
+    const f = POT10[casas];
+    const inteira = Math.floor(r / f);
+    let frac = r - inteira * f;
+    this.inteiro(inteira);
+    if (casas > 0) {
+      const b = this.buf;
+      b[this.p++] = 46;
+      const ini = this.p;
+      for (let k = casas - 1; k >= 0; k--) {
+        b[ini + k] = 48 + (frac % 10);
+        frac = Math.floor(frac / 10);
+      }
+      this.p = ini + casas;
+    }
+  }
+
+  /** Termina: entrega o último pedaço. */
+  fechar() {
+    this.esvaziar();
+    return this.total;
+  }
+}

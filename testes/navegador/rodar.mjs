@@ -13,7 +13,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import JSZip from 'jszip';
 import { gerarTodos, esfera } from '../gerar-modelos.mjs';
+import { VERSAO } from '../../js/config.js';
+import { ler3mf } from '../../js/io/3mf.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -210,7 +213,7 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 /** Alvos de toque visíveis menores que 44 px. */
 const alvosPequenos = (pagina) => pagina.evaluate(() => {
   const ruins = [];
-  for (const el of document.querySelectorAll('button, [role="menuitem"], input:not([hidden])')) {
+  for (const el of document.querySelectorAll('button, select, [role="menuitem"], input:not([hidden])')) {
     const r = el.getBoundingClientRect();
     const st = getComputedStyle(el);
     if (r.width === 0 || r.height === 0 || st.visibility === 'hidden') continue;
@@ -226,6 +229,40 @@ const visivelNaTela = (pagina, seletor) => pagina.evaluate((s) => {
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0 && r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1 && getComputedStyle(el).display !== 'none';
 }, seletor);
+
+// ---------- exportação ----------
+/** Faz a ação que exporta, espera o download e devolve o arquivo baixado. */
+async function exportar(pagina, acao) {
+  const [download] = await Promise.all([
+    pagina.waitForEvent('download', { timeout: 300000 }),
+    acao(),
+  ]);
+  const nome = download.suggestedFilename();
+  const caminho = join(RESULTADOS, nome);
+  await download.saveAs(caminho);
+  await pagina.waitForFunction(() => !window.__fatiador.estado.ocupado && window.__fatiador.estado.malha, null, { timeout: 60000 });
+  return { nome, buffer: readFileSync(caminho) };
+}
+
+/** O XML abre sem erro no leitor estrito do navegador? Devolve '' ou o erro. */
+const erroXml = (pagina, texto) => pagina.evaluate((t) => {
+  const d = new DOMParser().parseFromString(t, 'application/xml');
+  const e = d.getElementsByTagName('parsererror')[0];
+  return e ? e.textContent.slice(0, 200) : '';
+}, texto);
+
+async function conferirXml(pagina, buffer, rotulo) {
+  const zip = await JSZip.loadAsync(buffer, { checkCRC32: true });
+  const erros = [];
+  for (const c of ['3D/3dmodel.model', 'Metadata/model_settings.config', '[Content_Types].xml', '_rels/.rels']) {
+    const e = await erroXml(pagina, await zip.file(c).async('string'));
+    if (e) erros.push(`${c}: ${e}`);
+  }
+  confere(erros.length === 0, `${rotulo}: XML válido no leitor estrito do navegador`, erros.join(' | '));
+  return zip;
+}
+
+const coresNaTela = (pagina) => pagina.evaluate(() => window.__fatiador.visualizador.coresNaTela().map((c) => c.cor));
 
 // ---------- toque (Chrome DevTools Protocol) ----------
 async function toque(cdp, tipo, pontos) {
@@ -262,7 +299,8 @@ async function principal() {
     console.log('\n[PC de 4 GB]');
     {
       const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.pc4gb);
-      confere(await pagina.textContent('#versao') === 'v0.0.1', 'mostra a versão v0.0.1');
+      confere(await pagina.textContent('#versao') === VERSAO, `mostra a versão ${VERSAO}`);
+      confere(await pagina.isDisabled('.painel [data-acao="exportar"]'), 'Exportar 3MF desligado sem modelo');
       let e = await estado(pagina);
       confere(e.modoLeve === true && e.limiteTela === 300000, 'modo leve liga sozinho com 4 GB', JSON.stringify(e));
       confere(await pagina.textContent('#chip-modo-leve') === 'Modo leve', 'chip "Modo leve" no topo');
@@ -281,9 +319,46 @@ async function principal() {
       confere(e.objetos.length === 2 && e.objetos[0] === 'Boneco & olho', '3MF do Bambu abre com os objetos', JSON.stringify(e.objetos));
       confere(e.avisos.some((a) => a.includes('Pintura do Bambu')), 'avisa que a pintura chega na etapa 1.3');
 
+      // ---- 3MF ida e volta (etapa 1.2) ----
+      await abrirModelo(pagina, arq.projeto);
+      e = await estado(pagina);
+      confere(e.objetos.length === 4, `projeto do Bambu abre com 4 objetos (${e.objetos.join(', ')})`);
+      confere(await pagina.locator('#lista-filamentos li').count() === 4, 'painel mostra os 4 filamentos');
+      confere(await pagina.locator('#conteudo-modelo .placa').count() === 2, 'painel mostra as 2 placas');
+      confere((await pagina.textContent('#conteudo-modelo')).includes('modificador'), 'parte modificadora aparece na lista');
+      let cores = await coresNaTela(pagina);
+      confere(['#1A1A1A', '#1B2A6B', '#D9C49A'].every((c) => cores.includes(c)) && !cores.includes('#FFFFFF'), `cada parte na cor do filamento; a que não imprime fica apagada (${cores.join(' ')})`);
+      await pagina.selectOption('.seletor-filamento[data-objeto="0"][data-parte="1"]', '4');
+      const trocou = await pagina.evaluate(() => window.__fatiador.estado.malha.objetos[0].partes[1].extrusora);
+      cores = await coresNaTela(pagina);
+      confere(trocou === 4 && !cores.includes('#D9C49A'), 'trocar o filamento do olho muda a cor na tela', cores.join(' '));
+      confere(!(await pagina.isDisabled('.painel [data-acao="exportar"]')), 'Exportar 3MF ligado com modelo');
+      let baixado = await exportar(pagina, () => pagina.click('.painel [data-acao="exportar"]'));
+      confere(baixado.nome === 'projeto-bambu_fatiador.3mf', `botão Exportar baixa "${baixado.nome}"`);
+      let volta = await ler3mf(baixado.buffer, JSZip);
+      confere(volta.objetos.length === 4 && volta.objetos[0].partes.length === 3 && volta.placas.length === 2, 'arquivo exportado tem os mesmos objetos, partes e placas');
+      confere(volta.objetos[0].partes[1].extrusora === 4, 'filamento trocado foi para o arquivo');
+      confere(volta.trianguloPintados === 19, `pintura foi junto (${volta.trianguloPintados} triângulos)`);
+      await conferirXml(pagina, baixado.buffer, 'projeto exportado');
+      e = await estado(pagina);
+      const naTela = await pagina.evaluate(() => {
+        const v = window.__fatiador.visualizador;
+        return { pos: v.peca.geometry.attributes.position.array.length, tri: v.trianguloNaTela, cores: v.coresNaTela().length };
+      });
+      confere(e.objetos.length === 4 && naTela.pos > 0 && naTela.tri === e.triangulos && naTela.cores >= 3, 'depois de exportar o modelo continua aberto na tela', JSON.stringify(naTela));
+
+      // STL pelo atalho Ctrl+E: ganha miniatura e vai para o centro da placa
       await abrirModelo(pagina, arq.cubosObj);
       e = await estado(pagina);
       confere(e.triangulos === 24 && e.objetos.length === 2, 'OBJ abre com 2 objetos');
+      baixado = await exportar(pagina, () => pagina.keyboard.press('Control+e'));
+      volta = await ler3mf(baixado.buffer, JSZip);
+      const zipObj = await conferirXml(pagina, baixado.buffer, 'OBJ exportado');
+      const png = await zipObj.file('Metadata/plate_1.png')?.async('uint8array');
+      confere(png && png[0] === 0x89 && png[1] === 0x50 && png.length > 2000, `Ctrl+E exporta, com miniatura da peça (${png ? png.length : 0} bytes)`);
+      confere(volta.objetos.map((o) => o.nome).join() === 'Cubo grande,Cubo pequeno', 'objetos do OBJ viram objetos no 3MF');
+      const cx = volta.posicoes.reduce((a, v, i) => (i % 3 === 0 ? a + v : a), 0) / (volta.posicoes.length / 3);
+      confere(cx > 100 && cx < 160, `peças no meio da placa da A1 (x médio ${cx.toFixed(1)} mm)`);
 
       await abrirModelo(pagina, arq.cuboTexto);
       e = await estado(pagina);
@@ -340,6 +415,7 @@ async function principal() {
       await pagina.waitForTimeout(750);
       await pagina.mouse.up();
       confere(await visivelNaTela(pagina, '#menu-contexto'), 'segurar abre o menu');
+      confere(await pagina.getByRole('menuitem', { name: 'Exportar 3MF' }).count() === 1, 'menu tem "Exportar 3MF"');
       await pagina.getByRole('menuitem', { name: 'Vista de cima' }).click();
       await pagina.waitForTimeout(100);
       const cima = await camera(pagina);
@@ -389,6 +465,18 @@ async function principal() {
       confere(largura[0] <= largura[1], 'sem rolagem para o lado', JSON.stringify(largura));
       let pequenos = await alvosPequenos(pagina);
       confere(pequenos.length === 0, 'alvos de toque com 44 px ou mais', pequenos.join(', '));
+
+      await abrirModelo(pagina, arq.projeto);
+      const baixado = await exportar(pagina, () => pagina.locator('.barra-inferior [data-acao="exportar"]').tap());
+      const volta = await ler3mf(baixado.buffer, JSZip);
+      confere(volta.objetos.length === 4 && volta.trianguloPintados === 19, `"Exportar" na barra de baixo baixa o 3MF (${baixado.nome})`);
+      await pagina.locator('.barra-inferior [data-abre="painel-propriedades"]').tap();
+      await pagina.waitForTimeout(350);
+      pequenos = await alvosPequenos(pagina);
+      confere(pequenos.length === 0, 'seletores de filamento com 44 px ou mais', pequenos.join(', '));
+      await pagina.screenshot({ path: join(RESULTADOS, 's23-placas.png') });
+      await pagina.locator('.barra-inferior [data-abre="painel-propriedades"]').tap();
+      await pagina.waitForTimeout(350);
 
       const ms = await abrirModelo(pagina, arq.pesado);
       e = await estado(pagina);
@@ -467,10 +555,12 @@ async function principal() {
       await contexto.setOffline(true);
       await pagina.reload();
       await pagina.waitForFunction(() => document.documentElement.dataset.pronto === 'sim', null, { timeout: 30000 });
-      confere(await pagina.textContent('#versao') === 'v0.0.1', 'sem internet o app abre do mesmo jeito');
+      confere(await pagina.textContent('#versao') === VERSAO, 'sem internet o app abre do mesmo jeito');
       await abrirModelo(pagina, arq.bambu);
       const e = await estado(pagina);
       confere(e.objetos.length === 2, 'sem internet ainda abre 3MF (worker e JSZip guardados)');
+      const baixado = await exportar(pagina, () => pagina.click('.painel [data-acao="exportar"]'));
+      confere(baixado.buffer.length > 500, 'sem internet também exporta 3MF');
       confere(erros.length === 0, 'sem erros no console', erros.join(' | '));
       await contexto.close();
     }
@@ -491,6 +581,22 @@ async function principal() {
         console.log(`      mesa: ${selo}`);
         if (/arco|smile/i.test(nome)) confere(/^Cab|^Cada objeto cabe/.test(selo), `${nome}: cada peça cabe na mesa da A1`, selo);
         await pagina.screenshot({ path: join(RESULTADOS, `modelo-${nome}.png`) });
+        if (/\.3mf$/i.test(nome)) {
+          const original = await ler3mf(readFileSync(join(pastaModelos, nome)), JSZip);
+          const t0 = Date.now();
+          const baixado = await exportar(pagina, () => pagina.click('.painel [data-acao="exportar"]'));
+          const seg = (Date.now() - t0) / 1000;
+          const depois = await estado(pagina);
+          const volta = await ler3mf(baixado.buffer, JSZip);
+          let iguais = volta.indices.length === original.indices.length && volta.posicoes.length === original.posicoes.length;
+          for (let i = 0; iguais && i < original.posicoes.length; i++) if (Math.abs(original.posicoes[i] - volta.posicoes[i]) > 1e-9) iguais = false;
+          const pinturaIgual = !original.pintura || Buffer.compare(Buffer.from(original.pintura.atributos), Buffer.from(volta.pintura.atributos)) === 0;
+          confere(iguais && pinturaIgual && volta.objetos.length === original.objetos.length
+            && JSON.stringify(volta.placas.map((p) => p.objetos)) === JSON.stringify(original.placas.map((p) => p.objetos))
+            && JSON.stringify(volta.objetos.map((o) => o.partes.map((p) => p.extrusora))) === JSON.stringify(original.objetos.map((o) => o.partes.map((p) => p.extrusora))),
+          `${nome}: exportado e relido igual (${seg.toFixed(1)} s, ${(baixado.buffer.length / 1048576).toFixed(1)} MB, pintura ${volta.trianguloPintados} triângulos, ${depois.totalMB.toFixed(0)} MB em uso depois)`);
+          if (/smile/i.test(nome)) await conferirXml(pagina, baixado.buffer, nome);
+        }
       }
       confere(erros.length === 0, 'sem erros no console', erros.join(' | '));
       await contexto.close();
