@@ -16,4 +16,5 @@
 - Atalhos no computador: Ctrl+O abrir, F enquadrar, 0/1/3/7 vistas 3D/frente/lado/cima.
 - **App instalável (PWA)** e funcionando offline com o que já foi aberto uma vez.
 - Camada única de armazenamento (`js/core/armazenamento.js`), hoje local (IndexedDB), pronta para o Google Drive depois.
-- Testes automáticos: leitores, simplificação, PWA e o app no navegador simulando o PC de 4 GB, tablet, Galaxy S23 Ultra e aparelho fraco.
+- Com vários objetos (projetos do Bambu com mais de uma placa), o aviso da mesa olha cada objeto: "Cada objeto cabe na mesa da A1". A lista de objetos mostra as medidas de cada um.
+- Testes automáticos: leitores, simplificação, PWA e o app no navegador simulando o PC de 4 GB, tablet, Galaxy S23 Ultra e aparelho fraco, e abrem os modelos de referência (arco rendilhado: 1,1 milhão de triângulos em ~1,6 s; boneco smile: 553 mil em ~1 s; ambos com ~60 MB no modo leve).

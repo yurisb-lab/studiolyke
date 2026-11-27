@@ -16,15 +16,25 @@ export function renderizarModelo(el, estado) {
   const c = estado.caixa;
   const tri = m.indices.length / 3;
   const naTela = estado.tela ? estado.tela.indices.length / 3 : tri;
-  const cabe = c.tamanho[0] <= IMPRESSORA.mesaX && c.tamanho[1] <= IMPRESSORA.mesaY && c.tamanho[2] <= IMPRESSORA.alturaMax;
-  const objetos = m.objetos.slice(0, 50).map((o) => `<li><span>${esc(o.nome)}</span><span class="num">${formatarTriangulos(o.numTriangulos)}</span></li>`).join('');
+  const cabeNaMesa = (t) => t[0] <= IMPRESSORA.mesaX && t[1] <= IMPRESSORA.mesaY && t[2] <= IMPRESSORA.alturaMax;
+  const cabe = cabeNaMesa(c.tamanho);
+  const grandes = m.objetos.filter((o) => o.tamanho && !cabeNaMesa(o.tamanho));
+  const objetos = m.objetos.slice(0, 50).map((o) => {
+    const medidas = o.tamanho ? `<span class="nota">${o.tamanho.map((v) => Math.round(v)).join(' × ')} mm</span>` : '';
+    return `<li><span>${esc(o.nome)} ${medidas}</span><span class="num">${formatarTriangulos(o.numTriangulos)}</span></li>`;
+  }).join('');
   const maisObjetos = m.objetos.length > 50 ? `<li class="mais">e mais ${m.objetos.length - 50}…</li>` : '';
   const avisos = m.avisos.length
     ? `<ul class="lista-avisos">${m.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`
     : '';
+  const a1 = IMPRESSORA.nome.replace('Bambu Lab ', '');
   let situacaoMesa;
-  if (cabe) situacaoMesa = `<span class="selo ok">Cabe na mesa da ${IMPRESSORA.nome.replace('Bambu Lab ', '')}</span>`;
-  else situacaoMesa = '<span class="selo perigo">Maior que a mesa: vai precisar dividir</span>';
+  if (cabe) situacaoMesa = `<span class="selo ok">Cabe na mesa da ${a1}</span>`;
+  else if (m.objetos.length > 1 && grandes.length === 0) {
+    situacaoMesa = `<span class="selo ok">Cada objeto cabe na mesa da ${a1}</span> <span class="nota">(estão espalhados em mais de uma placa)</span>`;
+  } else if (m.objetos.length > 1) {
+    situacaoMesa = `<span class="selo perigo">${grandes.length} objeto(s) maior(es) que a mesa: vai precisar dividir</span>`;
+  } else situacaoMesa = '<span class="selo perigo">Maior que a mesa: vai precisar dividir</span>';
 
   el.innerHTML = `
     <dl class="dados">

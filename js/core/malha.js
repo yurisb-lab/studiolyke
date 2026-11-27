@@ -173,6 +173,26 @@ export function caixaDaMalha(malha) {
   };
 }
 
+/** Medidas de cada objeto (para saber se cada um cabe na mesa). */
+export function caixasDosObjetos(malha) {
+  const p = malha.posicoes, idx = malha.indices;
+  return malha.objetos.map((o) => {
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    const fim = (o.primeiroTriangulo + o.numTriangulos) * 3;
+    for (let i = o.primeiroTriangulo * 3; i < fim; i++) {
+      const v = idx[i] * 3;
+      const x = p[v], y = p[v + 1], z = p[v + 2];
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (z < z0) z0 = z;
+      if (z > z1) z1 = z;
+    }
+    return [x1 - x0, y1 - y0, z1 - z0];
+  });
+}
+
 /** Buffers para postMessage(..., transfer): passam ao worker sem copiar. */
 export function transferiveis(...malhas) {
   const lista = [];
