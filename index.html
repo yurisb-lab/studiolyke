@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Fatiador L.Y.K.E 3D</title>
+  <meta name="description" content="Dividir, conectar, pintar e exportar peças 3D para o Bambu Studio.">
+  <meta name="theme-color" content="#15171a">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icones/icone.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icones/icone-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <!-- Bibliotecas com versão fixa (mesmos endereços de js/config.js) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-abrir" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+      <symbol id="i-enquadrar" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 8.2l3.5 2v3.6L12 15.8l-3.5-2v-3.6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+      <symbol id="i-ferramentas" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5.5M12 7.6v.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-cubo" viewBox="0 0 24 24"><path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z M4.5 7.7L12 12l7.5-4.3M12 12v8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-cima" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2" fill="currentColor"/></symbol>
+      <symbol id="i-frente" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 19h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+      <symbol id="i-lado" viewBox="0 0 24 24"><path d="M7 19V9l5-4 5 4v10z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 19h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app">
+    <header class="topo">
+      <button type="button" class="botao-icone so-gaveta so-tablet" data-abre="painel-ferramentas" aria-controls="painel-ferramentas" aria-expanded="false" aria-label="Ferramentas">
+        <svg aria-hidden="true"><use href="#i-ferramentas"/></svg>
+      </button>
+      <div class="marca">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M16 3l11 6.3v13.4L16 29 5 22.7V9.3z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M5 17.5l22-6" stroke="var(--destaque)" stroke-width="2.4" stroke-linecap="round"/></svg>
+        </span>
+        <span class="nome-app"><strong>Fatiador</strong> <span class="sub">L.Y.K.E 3D</span></span>
+        <span class="versao" data-versao id="versao">v0.0.1</span>
+      </div>
+      <div class="topo-direita">
+        <button type="button" id="chip-modo-leve" class="chip" aria-pressed="false">Modo leve</button>
+        <button type="button" id="medidor" class="medidor" data-nivel="ok">
+          <span class="barra" aria-hidden="true"><span></span></span>
+          <span class="texto">—</span>
+        </button>
+        <button type="button" class="botao-icone so-gaveta so-tablet" data-abre="painel-propriedades" aria-controls="painel-propriedades" aria-expanded="false" aria-label="Propriedades">
+          <svg aria-hidden="true"><use href="#i-info"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <aside id="painel-ferramentas" class="painel painel-esq" aria-label="Ferramentas">
+      <div class="alca" aria-hidden="true"><span></span></div>
+      <section>
+        <h2>Arquivo</h2>
+        <button type="button" class="ferramenta principal" data-acao="abrir">
+          <svg aria-hidden="true"><use href="#i-abrir"/></svg><span>Abrir modelo</span>
+        </button>
+        <p class="dica">STL, OBJ ou 3MF. No computador, dá para arrastar o arquivo para a tela.</p>
+      </section>
+      <section>
+        <h2>Vista</h2>
+        <div class="grade-ferramentas">
+          <button type="button" class="ferramenta" data-acao="enquadrar" title="Enquadrar (F)">
+            <svg aria-hidden="true"><use href="#i-enquadrar"/></svg><span>Enquadrar</span>
+          </button>
+          <button type="button" class="ferramenta" data-acao="vista-iso" title="Vista 3D (0)">
+            <svg aria-hidden="true"><use href="#i-cubo"/></svg><span>3D</span>
+          </button>
+          <button type="button" class="ferramenta" data-acao="vista-cima" title="De cima (7)">
+            <svg aria-hidden="true"><use href="#i-cima"/></svg><span>Cima</span>
+          </button>
+          <button type="button" class="ferramenta" data-acao="vista-frente" title="De frente (1)">
+            <svg aria-hidden="true"><use href="#i-frente"/></svg><span>Frente</span>
+          </button>
+          <button type="button" class="ferramenta" data-acao="vista-lado" title="De lado (3)">
+            <svg aria-hidden="true"><use href="#i-lado"/></svg><span>Lado</span>
+          </button>
+        </div>
+        <p class="dica so-computador">Mouse: arrastar gira, rodinha dá zoom, botão direito arrasta a vista. Segurar o clique abre o menu.</p>
+        <p class="dica so-toque">Um dedo gira, pinça dá zoom, dois dedos arrastam. Segure o dedo para abrir o menu.</p>
+      </section>
+    </aside>
+
+    <main id="area-3d" class="area-3d">
+      <div id="vazio" class="vazio">
+        <p class="vazio-titulo">Abra uma peça para começar</p>
+        <p class="vazio-sub">STL, OBJ ou 3MF do Bambu Studio</p>
+        <button type="button" class="botao principal" data-acao="abrir">
+          <svg aria-hidden="true"><use href="#i-abrir"/></svg> Abrir modelo
+        </button>
+        <p class="vazio-sub so-computador">ou arraste o arquivo para cá</p>
+      </div>
+      <div id="progresso" class="progresso" hidden role="status" aria-live="polite">
+        <p id="progresso-texto">Abrindo…</p>
+        <div class="progresso-trilho"><div id="progresso-barra"></div></div>
+      </div>
+      <div class="soltar" aria-hidden="true"><p>Solte o arquivo aqui</p></div>
+      <p id="erro-inicio" class="erro-inicio" hidden></p>
+    </main>
+
+    <aside id="painel-propriedades" class="painel painel-dir" aria-label="Propriedades">
+      <div class="alca" aria-hidden="true"><span></span></div>
+      <section id="sec-modelo">
+        <h2>Modelo</h2>
+        <div id="conteudo-modelo"></div>
+      </section>
+      <section id="sec-aparelho">
+        <h2>Aparelho</h2>
+        <div id="conteudo-aparelho"></div>
+      </section>
+      <section id="sec-memoria">
+        <h2>Memória</h2>
+        <div id="conteudo-memoria"></div>
+      </section>
+      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.1</span></p>
+    </aside>
+
+    <nav class="barra-inferior" aria-label="Barra de ferramentas">
+      <button type="button" data-acao="abrir"><svg aria-hidden="true"><use href="#i-abrir"/></svg><span>Abrir</span></button>
+      <button type="button" data-acao="enquadrar"><svg aria-hidden="true"><use href="#i-enquadrar"/></svg><span>Enquadrar</span></button>
+      <button type="button" data-abre="painel-ferramentas" aria-controls="painel-ferramentas" aria-expanded="false"><svg aria-hidden="true"><use href="#i-cubo"/></svg><span>Vistas</span></button>
+      <button type="button" data-abre="painel-propriedades" aria-controls="painel-propriedades" aria-expanded="false"><svg aria-hidden="true"><use href="#i-info"/></svg><span>Info</span></button>
+    </nav>
+
+    <div id="fundo-gaveta" class="fundo-gaveta"></div>
+  </div>
+
+  <div id="menu-contexto" class="menu-contexto" role="menu" hidden></div>
+  <div id="avisos" class="avisos" aria-live="polite"></div>
+
+  <dialog id="dialogo-grande" class="dialogo">
+    <h2>Modelo grande para este aparelho</h2>
+    <p id="dlg-texto"></p>
+    <p id="dlg-sugestao"></p>
+    <p id="dlg-outro-aparelho" class="nota" hidden>Este aparelho é fraco para modelos grandes. Se puder, abra este em outro aparelho.</p>
+    <div class="dialogo-botoes">
+      <button type="button" id="dlg-simplificar" class="botao principal">Simplificar ao abrir</button>
+      <button type="button" id="dlg-completo" class="botao">Abrir completo</button>
+      <button type="button" id="dlg-cancelar" class="botao discreto">Cancelar</button>
+    </div>
+  </dialog>
+
+  <input type="file" id="entrada-arquivo" hidden>
+</body>
+</html>

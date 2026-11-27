@@ -1,0 +1,264 @@
+// Visualizador 3D (three.js). Eixo Z para cima, como no Bambu Studio; tudo em mm.
+// Desenha só quando algo muda (sem laço contínuo), para poupar o PC e a bateria.
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { IMPRESSORA } from '../config.js';
+
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+const COR_PECA = 0xdfe3e8;
+const COR_MESA = 0x22262d;
+const COR_GRADE = 0x2f343c;
+const COR_GRADE_FORTE = 0x3d444f;
+const COR_BORDA = 0x59616e;
+
+export const VISTAS = {
+  iso: new THREE.Vector3(0.75, -1, 0.7),
+  frente: new THREE.Vector3(0, -1, 0.0001),
+  cima: new THREE.Vector3(0, -0.0001, 1),
+  lado: new THREE.Vector3(1, 0, 0.0001),
+};
+
+export class Visualizador {
+  constructor(container, perfil, { aoPerderContexto } = {}) {
+    this.container = container;
+    this.perfil = perfil;
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !perfil.modoLeve,
+      powerPreference: perfil.modoLeve ? 'default' : 'high-performance',
+    });
+    this.renderer.setClearColor(0x15171a, 1);
+    this.renderer.domElement.className = 'tela-3d';
+    this.renderer.domElement.setAttribute('aria-label', 'Visualização 3D da peça');
+    container.prepend(this.renderer.domElement);
+
+    this.cena = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(40, 1, 1, 5000);
+    this.cena.add(this.camera);
+
+    // Luz: céu + chave fixa (com sombra no modo normal) + luz que acompanha a câmera.
+    this.cena.add(new THREE.HemisphereLight(0xffffff, 0x3a3f48, 1.4));
+    this.luzChave = new THREE.DirectionalLight(0xffffff, 1.6);
+    this.luzChave.position.set(-120, -160, 260);
+    this.cena.add(this.luzChave, this.luzChave.target);
+    const farol = new THREE.DirectionalLight(0xffffff, 0.9);
+    farol.position.set(0, 0, 0);
+    farol.target.position.set(0, 0, -1);
+    this.camera.add(farol, farol.target);
+
+    this.cena.add(this._criarMesa());
+    this.sombra = new THREE.Mesh(
+      new THREE.PlaneGeometry(IMPRESSORA.mesaX * 3, IMPRESSORA.mesaY * 3),
+      new THREE.ShadowMaterial({ opacity: 0.28 }),
+    );
+    this.sombra.position.z = -0.04;
+    this.sombra.receiveShadow = true;
+    this.cena.add(this.sombra);
+
+    this.grupoModelo = new THREE.Group();
+    this.cena.add(this.grupoModelo);
+    this.peca = null;
+    this.caixa = null;
+    this.trianguloNaTela = 0;
+    this.bytesGpu = 0;
+
+    this.controles = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controles.enableDamping = false;
+    this.controles.screenSpacePanning = true;
+    this.controles.zoomToCursor = true;
+    this.controles.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    this.controles.addEventListener('change', () => this.desenhar());
+
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      if (aoPerderContexto) aoPerderContexto();
+    });
+    canvas.addEventListener('webglcontextrestored', () => this.desenhar());
+
+    this._observador = new ResizeObserver(() => this.redimensionar());
+    this._observador.observe(container);
+    this.aplicarPerfil(perfil);
+    this.redimensionar();
+    this.enquadrar('iso');
+  }
+
+  _criarMesa() {
+    const { mesaX: X, mesaY: Y } = IMPRESSORA;
+    const g = new THREE.Group();
+    g.name = 'mesa';
+    const placa = new THREE.Mesh(
+      new THREE.PlaneGeometry(X, Y),
+      new THREE.MeshBasicMaterial({ color: COR_MESA }),
+    );
+    placa.position.z = -0.12;
+    g.add(placa);
+    const fina = [], forte = [];
+    for (let x = -X / 2; x <= X / 2 + 0.01; x += 10) {
+      const alvo = Math.round(x + X / 2) % 50 === 0 ? forte : fina;
+      alvo.push(x, -Y / 2, 0, x, Y / 2, 0);
+    }
+    for (let y = -Y / 2; y <= Y / 2 + 0.01; y += 10) {
+      const alvo = Math.round(y + Y / 2) % 50 === 0 ? forte : fina;
+      alvo.push(-X / 2, y, 0, X / 2, y, 0);
+    }
+    const linhas = (pos, cor) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      const l = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: cor }));
+      l.position.z = -0.08;
+      return l;
+    };
+    g.add(linhas(fina, COR_GRADE), linhas(forte, COR_GRADE_FORTE));
+    const borda = [-X / 2, -Y / 2, 0, X / 2, -Y / 2, 0, X / 2, -Y / 2, 0, X / 2, Y / 2, 0,
+      X / 2, Y / 2, 0, -X / 2, Y / 2, 0, -X / 2, Y / 2, 0, -X / 2, -Y / 2, 0];
+    const b = linhas(borda, COR_BORDA);
+    b.position.z = -0.06;
+    g.add(b);
+    return g;
+  }
+
+  aplicarPerfil(perfil) {
+    this.perfil = perfil;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, perfil.pixelMax));
+    const sombras = !!perfil.sombras;
+    this.renderer.shadowMap.enabled = sombras;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.luzChave.castShadow = sombras;
+    this.luzChave.shadow.mapSize.set(2048, 2048);
+    this.sombra.visible = sombras;
+    if (this.peca) this.peca.castShadow = sombras;
+    this.cena.traverse((o) => {
+      if (o.material) o.material.needsUpdate = true;
+    });
+    this.redimensionar();
+  }
+
+  redimensionar() {
+    const w = Math.max(1, this.container.clientWidth);
+    const h = Math.max(1, this.container.clientHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.perfil.pixelMax));
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.desenhar();
+  }
+
+  desenhar() {
+    if (this._pendente) return;
+    this._pendente = true;
+    requestAnimationFrame(() => {
+      this._pendente = false;
+      this.renderer.render(this.cena, this.camera);
+    });
+  }
+
+  /** Tira a peça da tela e libera a memória da placa de vídeo. */
+  limpar() {
+    if (this.peca) {
+      this.grupoModelo.remove(this.peca);
+      this.peca.geometry.dispose();
+      this.peca.material.dispose();
+      this.peca = null;
+    }
+    this.caixa = null;
+    this.trianguloNaTela = 0;
+    this.bytesGpu = 0;
+    this.desenhar();
+  }
+
+  /**
+   * Mostra uma malha {posicoes, indices}. A caixa é a da malha completa:
+   * a peça é apoiada na mesa (z = 0) e centralizada, só na tela; os dados não mudam.
+   */
+  mostrar(malhaTela, caixa) {
+    const enquadrarDepois = !this.peca;
+    if (this.peca) {
+      this.grupoModelo.remove(this.peca);
+      this.peca.geometry.dispose();
+      this.peca.material.dispose();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(malhaTela.posicoes, 3));
+    geo.setIndex(new THREE.BufferAttribute(malhaTela.indices, 1));
+    const [x0, y0, z0] = caixa.min, [x1, y1, z1] = caixa.max;
+    geo.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+    geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
+    const mat = new THREE.MeshStandardMaterial({
+      color: COR_PECA,
+      roughness: 0.6,
+      metalness: 0,
+      flatShading: true, // normais calculadas na placa de vídeo: não gasta memória
+      side: THREE.DoubleSide,
+    });
+    // Triângulos menores que um pixel dão normal inválida (vira ponto preto).
+    // Nesse caso usamos uma normal virada para a câmera.
+    mat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        THREE.ShaderChunk.normal_fragment_begin.replace(
+          'vec3 normal = normalize( cross( fdx, fdy ) );',
+          'vec3 nCruz = cross( fdx, fdy ); vec3 normal = dot( nCruz, nCruz ) > 1e-24 ? normalize( nCruz ) : vec3( 0.0, 0.0, 1.0 );',
+        ),
+      );
+    };
+    this.peca = new THREE.Mesh(geo, mat);
+    this.peca.castShadow = !!this.perfil.sombras;
+    this.peca.name = 'peca';
+    this.grupoModelo.add(this.peca);
+    this.grupoModelo.position.set(-(x0 + x1) / 2, -(y0 + y1) / 2, -z0);
+    this.caixa = caixa;
+    this.trianguloNaTela = malhaTela.indices.length / 3;
+    this.bytesGpu = malhaTela.posicoes.byteLength + malhaTela.indices.byteLength;
+    this._ajustarSombra();
+    if (enquadrarDepois) this.enquadrar('iso');
+    else this.desenhar();
+  }
+
+  _ajustarSombra() {
+    if (!this.caixa) return;
+    const [sx, sy, sz] = this.caixa.tamanho;
+    const r = Math.max(sx, sy, sz, 20) * 1.2;
+    const s = this.luzChave.shadow.camera;
+    s.left = -r; s.right = r; s.top = r; s.bottom = -r;
+    s.near = 1; s.far = 4 * r + 600;
+    this.luzChave.position.set(-0.45 * r - 60, -0.6 * r - 80, sz + r + 200);
+    this.luzChave.target.position.set(0, 0, sz / 2);
+    s.updateProjectionMatrix();
+  }
+
+  /** Aponta a câmera para a peça (ou para a mesa, se não houver peça). */
+  enquadrar(vista) {
+    let centro, raio;
+    if (this.caixa) {
+      const [sx, sy, sz] = this.caixa.tamanho;
+      centro = new THREE.Vector3(0, 0, sz / 2);
+      raio = Math.max(0.5 * Math.hypot(sx, sy, sz), 1);
+    } else {
+      centro = new THREE.Vector3(0, 0, 0);
+      raio = Math.hypot(IMPRESSORA.mesaX, IMPRESSORA.mesaY) / 2;
+    }
+    let dir;
+    if (vista && VISTAS[vista]) dir = VISTAS[vista].clone().normalize();
+    else dir = this.camera.position.clone().sub(this.controles.target).normalize();
+    if (!Number.isFinite(dir.x) || dir.lengthSq() === 0) dir = VISTAS.iso.clone().normalize();
+    const fovV = THREE.MathUtils.degToRad(this.camera.fov);
+    const fovH = 2 * Math.atan(Math.tan(fovV / 2) * this.camera.aspect);
+    const dist = (raio / Math.sin(Math.min(fovV, fovH) / 2)) * 1.08;
+    this.camera.near = Math.max(0.05, dist / 500);
+    this.camera.far = dist * 40 + 2000;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.copy(centro).addScaledVector(dir, dist);
+    this.controles.target.copy(centro);
+    this.controles.minDistance = raio * 0.05;
+    this.controles.maxDistance = dist * 20 + 1000;
+    this.controles.update();
+    this.desenhar();
+  }
+
+  infoGpu() {
+    const i = this.renderer.info;
+    return { geometrias: i.memory.geometries, chamadas: i.render.calls, triangulos: i.render.triangles };
+  }
+}
