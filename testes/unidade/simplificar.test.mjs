@@ -70,3 +70,36 @@ test('medidas de cada objeto', () => {
   const [t] = caixasDosObjetos(m);
   for (const v of t) assert.ok(Math.abs(v - 20) < 0.5);
 });
+
+test('malha da tela separa as partes (cada uma na cor do seu filamento)', async () => {
+  const JSZip = (await import('jszip')).default;
+  const { ler3mf } = await import('../../js/io/3mf.js');
+  const { bambuProjeto3mf } = await import('../gerar-modelos.mjs');
+  const { faixasDasPartes } = await import('../../js/core/projeto.js');
+  const m = await ler3mf(await bambuProjeto3mf(), JSZip);
+  const tela = malhaDaTela(MeshoptSimplifier, m, 40);
+  const faixas = faixasDasPartes(m);
+  assert.equal(tela.faixas.length, faixas.length);
+  let soma = 0;
+  tela.faixas.forEach((f) => { assert.equal(f.primeiroTriangulo, soma); soma += f.numTriangulos; });
+  assert.equal(soma, tela.indices.length / 3, 'faixas cobrem a malha da tela');
+  assert.ok(tela.posicoes instanceof Float32Array, 'tela em precisão simples (placa de vídeo)');
+  assert.ok(m.posicoes instanceof Float64Array, 'malha do 3MF em precisão dupla');
+});
+
+test('simplificar ao abrir mantém partes, filamentos e placas; a pintura sai com aviso', async () => {
+  const JSZip = (await import('jszip')).default;
+  const { ler3mf } = await import('../../js/io/3mf.js');
+  const { bambuProjeto3mf } = await import('../gerar-modelos.mjs');
+  const m = await ler3mf(await bambuProjeto3mf(), JSZip);
+  const s = simplificarMalha(MeshoptSimplifier, m, 60);
+  assert.ok(s.indices.length / 3 < m.indices.length / 3);
+  assert.deepEqual(s.objetos.map((o) => o.partes.map((p) => [p.nome, p.extrusora])), m.objetos.map((o) => o.partes.map((p) => [p.nome, p.extrusora])));
+  assert.deepEqual(s.placas, m.placas);
+  assert.deepEqual(s.filamentos, m.filamentos);
+  assert.equal(s.pintura, null);
+  assert.ok(s.avisos.some((a) => a.includes('pintura do Bambu foi descartada')));
+  for (const o of s.objetos) {
+    assert.equal(o.numTriangulos, o.partes.reduce((t, p) => t + p.numTriangulos, 0));
+  }
+});

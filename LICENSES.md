@@ -10,6 +10,8 @@ Regra do projeto: só MIT, Apache 2.0, BSD, ISC, Boost e OFL (fontes). Nada de G
 | [meshoptimizer](https://github.com/zeux/meshoptimizer) (simplificador em WASM) | 1.3.0 | MIT | Malha leve da tela e "simplificar ao abrir" | v0.0.1 |
 | [JSZip](https://github.com/Stuk/jszip) | 3.10.2 | MIT **ou** GPL-3.0, à escolha. **Usada pela opção MIT.** Inclui o pako (MIT). | Abrir o 3MF (que é um ZIP) | v0.0.1 |
 
+Para gravar o 3MF o app usa o compressor que já vem no navegador (`CompressionStream`), sem biblioteca nova.
+
 ## Usadas só nos testes automáticos (não vão para o app)
 
 | Ferramenta | Versão | Licença |
@@ -20,5 +22,7 @@ Regra do projeto: só MIT, Apache 2.0, BSD, ISC, Boost e OFL (fontes). Nada de G
 ## Previstas para as próximas etapas
 
 three-mesh-bvh (MIT), manifold-3d (Apache 2.0), Clipper2 (Boost), polylabel (ISC), opentype.js (MIT), three-gpu-pathtracer (MIT).
+
+O Bambu Studio (AGPL) foi usado só como programa, para fatiar e conferir os 3MF exportados; nenhum código dele está no app.
 
 Ferramentas de referência como BumpMesh/stlTexturizer e three-slicer (AGPL) servem só de inspiração: nenhum código delas é copiado.

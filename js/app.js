@@ -2,8 +2,9 @@
 
 import { VERSAO } from './config.js';
 import { medirCapacidade, perfilEmUso } from './core/capacidade.js';
-import { estimarAbertura, usoAtual, formatarMB, formatarTriangulos, extensao, FORMATOS } from './core/memoria.js';
+import { estimarAbertura, usoAtual, formatarMB, formatarTriangulos, extensao, FORMATOS, MB } from './core/memoria.js';
 import { bytesDaMalha, transferiveis } from './core/malha.js';
+import { aparenciaDasPartes, faixasDasPartes, trocarFilamento } from './core/projeto.js';
 import * as armazenamento from './core/armazenamento.js';
 import { executar } from './core/tarefas.js';
 import { Visualizador } from './ui/visualizador.js';
@@ -52,6 +53,7 @@ async function iniciar() {
     '-',
     { texto: estado.perfil.modoLeve ? 'Desligar o modo leve' : 'Ligar o modo leve', acao: () => mudarModoLeve(estado.perfil.modoLeve ? 'desligado' : 'ligado') },
     { texto: 'Abrir modelo…', acao: escolherArquivo },
+    ...(estado.malha ? [{ texto: 'Exportar 3MF', acao: exportar3mf }] : []),
   ]);
 
   ligarGestos(visualizador.renderer.domElement, {
@@ -64,6 +66,7 @@ async function iniciar() {
 
   ligarAtalhos({
     abrir: escolherArquivo,
+    exportar: exportar3mf,
     enquadrar: () => visualizador.enquadrar(),
     vista: (v) => visualizador.enquadrar(v),
   });
@@ -82,7 +85,7 @@ async function iniciar() {
   registrarServiceWorker();
 
   // Para os testes automáticos e para diagnóstico no console.
-  window.__fatiador = { estado, visualizador, abrirArquivo, mudarModoLeve, versao: VERSAO };
+  window.__fatiador = { estado, visualizador, abrirArquivo, mudarModoLeve, exportar3mf, versao: VERSAO };
   document.documentElement.dataset.pronto = 'sim';
 }
 
@@ -99,6 +102,7 @@ function ligarBotoes() {
     b.addEventListener('click', () => {
       const acao = b.dataset.acao;
       if (acao === 'abrir') escolherArquivo();
+      else if (acao === 'exportar') exportar3mf();
       else if (acao === 'enquadrar') visualizador.enquadrar();
       else if (acao.startsWith('vista-')) visualizador.enquadrar(acao.slice(6));
       if (modoGaveta() && b.closest('.painel')) paineis.fechar();
@@ -107,6 +111,10 @@ function ligarBotoes() {
   $('painel-propriedades').addEventListener('click', (e) => {
     const b = e.target.closest('[data-modo-leve]');
     if (b) mudarModoLeve(b.dataset.modoLeve);
+  });
+  $('painel-propriedades').addEventListener('change', (e) => {
+    const sel = e.target.closest('.seletor-filamento');
+    if (sel) mudarFilamento(Number(sel.dataset.objeto), Number(sel.dataset.parte), Number(sel.value));
   });
   $('chip-modo-leve').addEventListener('click', () => mudarModoLeve(estado.perfil.modoLeve ? 'desligado' : 'ligado'));
   $('medidor').addEventListener('click', () => {
@@ -183,7 +191,7 @@ async function abrirArquivo(arquivo) {
     estado.malha = r.malha;
     estado.tela = r.tela;
     estado.caixa = r.caixa;
-    visualizador.mostrar(r.tela || r.malha, r.caixa);
+    visualizador.mostrar(r.tela || r.malha, r.caixa, aparencia());
     visualizador.enquadrar('iso');
     const s = ((performance.now() - t0) / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     avisar(`${arquivo.name} aberto em ${s} s (${formatarTriangulos(r.malha.indices.length / 3)} triângulos).`);
@@ -271,7 +279,7 @@ async function refazerTelaSePreciso() {
   if (!precisa) return;
   if (tri <= limite) {
     estado.tela = null;
-    visualizador.mostrar(m, estado.caixa);
+    visualizador.mostrar(m, estado.caixa, aparencia());
     return;
   }
   mostrarProgresso('Refazendo a malha leve…', 0);
@@ -281,13 +289,114 @@ async function refazerTelaSePreciso() {
     const r = await executar('tela', { malha: m, limiteTela: limite }, transferiveis(m), mostrarProgresso);
     estado.malha = r.malha;
     estado.tela = r.tela;
-    visualizador.mostrar(r.tela || r.malha, estado.caixa);
+    visualizador.mostrar(r.tela || r.malha, estado.caixa, aparencia());
   } catch (erro) {
     avisar(`Não consegui refazer a malha da tela: ${erro.message}. Abra o modelo de novo.`, 'erro', 0);
     visualizador.limpar();
   } finally {
     esconderProgresso();
   }
+}
+
+// --- filamentos e exportação ----------------------------------------------------
+
+/** Cores das partes na tela: faixas da malha leve (ou da completa) + cor de cada parte. */
+function aparencia() {
+  const m = estado.malha;
+  if (!m) return null;
+  const faixas = estado.tela && estado.tela.faixas ? estado.tela.faixas : faixasDasPartes(m);
+  return { faixas, partes: aparenciaDasPartes(m) };
+}
+
+function mudarFilamento(io, ip, n) {
+  if (!estado.malha || estado.ocupado) return;
+  try {
+    trocarFilamento(estado.malha, io, ip, n);
+  } catch (erro) {
+    avisar(erro.message, 'erro');
+  }
+  const a = aparencia();
+  visualizador.colorir(a.faixas, a.partes);
+  atualizarPaineis();
+}
+
+/** Nome do arquivo exportado: "boneco.3mf" vira "boneco_fatiador.3mf". */
+export function nomeExportado(nome) {
+  const base = String(nome || 'modelo').replace(/\.[a-z0-9]+$/i, '').replace(/_fatiador$/i, '');
+  return `${base}_fatiador.3mf`;
+}
+
+async function exportar3mf() {
+  if (!estado.malha) {
+    avisar('Abra um modelo antes de exportar.', 'aviso');
+    return;
+  }
+  if (estado.ocupado) {
+    avisar('Espere terminar o que está em andamento.', 'aviso');
+    return;
+  }
+  estado.ocupado = true;
+  atualizarBotoes();
+  const m = estado.malha;
+  const nome = nomeExportado(m.nome);
+  mostrarProgresso('Preparando o 3MF…', 0);
+  const t0 = performance.now();
+  let miniatura = null;
+  const temMiniatura = m.arquivo3mf && m.arquivo3mf.extras.some((e) => e.caminho === 'Metadata/plate_1.png');
+  if (!temMiniatura) {
+    try {
+      miniatura = await visualizador.capturarMiniatura(512);
+    } catch (e) {
+      console.warn('Sem miniatura:', e);
+    }
+  }
+  // A malha vai emprestada ao worker (transferida, sem cópia) e volta junto com o arquivo.
+  estado.malha = null;
+  try {
+    const r = await executar('exportar', { malha: m, miniatura }, transferiveis(m), mostrarProgresso);
+    estado.malha = r.malha;
+    // Sem malha leve, a tela usava os próprios dados da malha: mostra de novo.
+    if (!estado.tela) visualizador.mostrar(estado.malha, estado.caixa, aparencia());
+    if (r.erro) throw new Error(r.erro);
+    baixar(r.arquivo, nome);
+    estado.ultimaExportacao = { nome, bytes: r.arquivo.size, info: r.info };
+    const seg = (performance.now() - t0) / 1000;
+    const tamanho = r.arquivo.size < MB
+      ? `${Math.max(1, Math.round(r.arquivo.size / 1024)).toLocaleString('pt-BR')} KB`
+      : formatarMB(r.arquivo.size / MB);
+    const tempo = seg >= 1 ? `, ${seg.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s` : '';
+    avisar(`Pronto: ${nome} (${tamanho}${tempo}). Abra no Bambu Studio.`, 'ok', 8000);
+  } catch (erro) {
+    console.error(erro);
+    avisar(`Não consegui exportar: ${erro.message}`, 'erro', 0);
+    if (!estado.malha) {
+      avisar('O modelo se perdeu no processo. Abra o arquivo de novo.', 'erro', 0);
+      visualizador.limpar();
+      estado.tela = null;
+    }
+  } finally {
+    estado.ocupado = false;
+    esconderProgresso();
+    atualizarPaineis();
+    atualizarMedidor();
+  }
+}
+
+function baixar(blob, nome) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nome;
+  a.hidden = true;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function atualizarBotoes() {
+  const pode = !!estado.malha && !estado.ocupado;
+  document.querySelectorAll('[data-acao="exportar"]').forEach((b) => { b.disabled = !pode; });
 }
 
 // --- painéis e medidor --------------------------------------------------------
@@ -302,10 +411,11 @@ function atualizarPaineis() {
     ? 'Modo leve ligado: menos detalhe na tela, sem sombras. Toque para desligar.'
     : 'Modo leve desligado. Toque para ligar.';
   document.body.classList.toggle('com-modelo', !!estado.malha);
+  atualizarBotoes();
 }
 
 function atualizarMedidor() {
-  const uso = usoAtual(bytesDaMalha(estado.malha), bytesDaMalha(estado.tela));
+  const uso = usoAtual(bytesDaMalha(estado.malha), bytesDaMalha(estado.tela) + (visualizador.bytesCopia || 0));
   // Os typed arrays da malha ficam fora do "heap" do JavaScript: somamos à parte.
   const usado = (uso.heapMB || 0) + uso.modeloMB + uso.telaMB;
   const fracao = usado / estado.perfil.orcamentoMB;

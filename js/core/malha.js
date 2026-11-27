@@ -3,11 +3,14 @@
 // Formato de uma malha:
 //   posicoes  Float32Array  [x0, y0, z0, x1, y1, z1, ...] em mm
 //   indices   Uint32Array   [a0, b0, c0, a1, b1, c1, ...] (3 por triângulo)
-//   objetos   [{ nome, primeiroTriangulo, numTriangulos }]  faixas de triângulos
+//   objetos   [{ nome, primeiroTriangulo, numTriangulos, partes: [...] }]  faixas de triângulos
 //   avisos    [texto]  coisas que o leitor corrigiu ou ignorou
+//   (filamentos, placas, pintura e arquivo3mf: ver js/core/projeto.js)
 //
 // Regra do modo leve: existe UMA cópia da malha completa. Para mandar ao worker,
 // os buffers são transferidos (não copiados) com transferiveis().
+
+import { garantirEstrutura } from './projeto.js';
 
 /** Array que cresce sozinho, para os leitores não saberem o tamanho de antemão. */
 export class ArrayCrescente {
@@ -126,7 +129,7 @@ export class Soldador {
 
 export function criarMalha({ posicoes, indices, objetos, avisos = [], extras = {} }) {
   const numTriangulos = indices.length / 3;
-  return {
+  return garantirEstrutura({
     posicoes,
     indices,
     objetos: objetos && objetos.length
@@ -134,7 +137,7 @@ export function criarMalha({ posicoes, indices, objetos, avisos = [], extras = {
       : [{ nome: 'Peça', primeiroTriangulo: 0, numTriangulos }],
     avisos,
     ...extras,
-  };
+  });
 }
 
 export function numTriangulos(malha) {
@@ -147,7 +150,10 @@ export function numVertices(malha) {
 
 export function bytesDaMalha(malha) {
   if (!malha) return 0;
-  return malha.posicoes.byteLength + malha.indices.byteLength;
+  let b = malha.posicoes.byteLength + malha.indices.byteLength;
+  if (malha.pintura) b += malha.pintura.atributos.byteLength + malha.pintura.inicio.byteLength;
+  if (malha.arquivo3mf) for (const e of malha.arquivo3mf.extras || []) b += e.bytes.byteLength;
+  return b;
 }
 
 /** Caixa que envolve a malha, em mm. */
@@ -193,14 +199,24 @@ export function caixasDosObjetos(malha) {
   });
 }
 
-/** Buffers para postMessage(..., transfer): passam ao worker sem copiar. */
+/**
+ * Buffers para postMessage(..., transfer): passam ao worker sem copiar.
+ * Inclui a pintura guardada e os arquivos extras do 3MF (configurações, miniaturas).
+ */
 export function transferiveis(...malhas) {
   const lista = [];
+  const juntar = (a) => {
+    if (a && a.buffer && a.buffer.byteLength && !lista.includes(a.buffer)) lista.push(a.buffer);
+  };
   for (const m of malhas) {
     if (!m) continue;
-    for (const a of [m.posicoes, m.indices]) {
-      if (a && a.buffer && a.buffer.byteLength && !lista.includes(a.buffer)) lista.push(a.buffer);
+    juntar(m.posicoes);
+    juntar(m.indices);
+    if (m.pintura) {
+      juntar(m.pintura.atributos);
+      juntar(m.pintura.inicio);
     }
+    if (m.arquivo3mf) for (const e of m.arquivo3mf.extras || []) juntar(e.bytes);
   }
   return lista;
 }

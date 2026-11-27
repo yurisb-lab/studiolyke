@@ -6,8 +6,10 @@ export const MB = 1048576;
 
 // Bytes por triângulo durante a leitura (pico) e depois (malha guardada).
 // Medidos nos leitores: STL binário ~50 B/tri do arquivo + ~70 B/tri de trabalho.
-const PICO_POR_TRI = { stl: 75, obj: 70, '3mf': 90 };
-const FINAL_POR_TRI = 18; // 12 (índices) + ~6 (vértices, ~metade do nº de triângulos)
+const PICO_POR_TRI = { stl: 75, obj: 70, '3mf': 96 };
+// 12 (índices) + vértices (~metade do nº de triângulos): 6 B em precisão simples,
+// 12 B no 3MF (precisão dupla, para a exportação voltar idêntica).
+const FINAL_POR_TRI = { stl: 18, obj: 18, '3mf': 24 };
 
 export function extensao(nome) {
   const m = /\.([a-z0-9]+)$/i.exec(nome || '');
@@ -42,7 +44,7 @@ export async function estimarAbertura(arquivo) {
   }
   const extra = ext === '3mf' ? bytesTexto : 0; // o XML descompactado fica na memória enquanto lê
   const picoMB = (arquivo.size + extra + triangulos * (PICO_POR_TRI[ext] || 80)) / MB;
-  const finalMB = (triangulos * FINAL_POR_TRI) / MB;
+  const finalMB = (triangulos * (FINAL_POR_TRI[ext] || 18)) / MB;
   return { triangulos, picoMB: Math.ceil(picoMB), finalMB: Math.ceil(finalMB), exato };
 }
 

@@ -159,9 +159,9 @@ export class Visualizador {
     if (this.peca) {
       this.grupoModelo.remove(this.peca);
       this.peca.geometry.dispose();
-      this.peca.material.dispose();
       this.peca = null;
     }
+    this._descartarMateriais();
     this.caixa = null;
     this.trianguloNaTela = 0;
     this.bytesGpu = 0;
@@ -172,25 +172,84 @@ export class Visualizador {
    * Mostra uma malha {posicoes, indices}. A caixa é a da malha completa:
    * a peça é apoiada na mesa (z = 0) e centralizada, só na tela; os dados não mudam.
    */
-  mostrar(malhaTela, caixa) {
+  mostrar(malhaTela, caixa, aparencia = null) {
     const enquadrarDepois = !this.peca;
     if (this.peca) {
       this.grupoModelo.remove(this.peca);
       this.peca.geometry.dispose();
-      this.peca.material.dispose();
     }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(malhaTela.posicoes, 3));
+    // A placa de vídeo só aceita precisão simples (o 3MF guarda em dupla).
+    const pos = malhaTela.posicoes instanceof Float32Array ? malhaTela.posicoes : new Float32Array(malhaTela.posicoes);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setIndex(new THREE.BufferAttribute(malhaTela.indices, 1));
     const [x0, y0, z0] = caixa.min, [x1, y1, z1] = caixa.max;
     geo.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
     geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
+    this.peca = new THREE.Mesh(geo, this._material(COR_PECA));
+    this.peca.castShadow = !!this.perfil.sombras;
+    this.peca.name = 'peca';
+    this.grupoModelo.add(this.peca);
+    this.grupoModelo.position.set(-(x0 + x1) / 2, -(y0 + y1) / 2, -z0);
+    this.caixa = caixa;
+    this.trianguloNaTela = malhaTela.indices.length / 3;
+    this.bytesGpu = pos.byteLength + malhaTela.indices.byteLength;
+    this.bytesCopia = pos === malhaTela.posicoes ? 0 : pos.byteLength;
+    if (aparencia) this.colorir(aparencia.faixas, aparencia.partes);
+    this._ajustarSombra();
+    if (enquadrarDepois) this.enquadrar('iso');
+    else this.desenhar();
+  }
+
+  /**
+   * Pinta cada faixa de triângulos (uma por parte) com a cor do filamento.
+   * Usa grupos da mesma geometria: não copia nada da malha.
+   * @param {{primeiroTriangulo:number, numTriangulos:number}[]} faixas
+   * @param {{cor:string, fantasma?:boolean, apagado?:boolean}[]} partes
+   */
+  colorir(faixas, partes) {
+    if (!this.peca) return;
+    const geo = this.peca.geometry;
+    geo.clearGroups();
+    const materiais = [];
+    const indiceDe = new Map();
+    let atual = null;
+    faixas.forEach((f, k) => {
+      if (!f.numTriangulos) return;
+      const a = partes[k] || { cor: '#DFE3E8' };
+      const chave = `${a.cor}|${a.fantasma ? 1 : 0}|${a.apagado ? 1 : 0}`;
+      if (!indiceDe.has(chave)) {
+        indiceDe.set(chave, materiais.length);
+        materiais.push(this._material(a.cor, a));
+      }
+      const mi = indiceDe.get(chave);
+      if (atual && atual.materialIndex === mi && atual.start + atual.count === f.primeiroTriangulo * 3) {
+        atual.count += f.numTriangulos * 3;
+      } else {
+        geo.addGroup(f.primeiroTriangulo * 3, f.numTriangulos * 3, mi);
+        atual = geo.groups[geo.groups.length - 1];
+      }
+    });
+    this.peca.material = materiais.length ? materiais : this._material(COR_PECA);
+    this.desenhar();
+  }
+
+  /** Material por cor, guardado para reaproveitar. */
+  _material(cor, { fantasma = false, apagado = false } = {}) {
+    if (!this._materiais) this._materiais = new Map();
+    const c = new THREE.Color(cor);
+    if (apagado) c.lerp(new THREE.Color(0x6b7280), 0.65);
+    const chave = `${c.getHexString()}|${fantasma}`;
+    if (this._materiais.has(chave)) return this._materiais.get(chave);
     const mat = new THREE.MeshStandardMaterial({
-      color: COR_PECA,
+      color: c,
       roughness: 0.6,
       metalness: 0,
       flatShading: true, // normais calculadas na placa de vídeo: não gasta memória
       side: THREE.DoubleSide,
+      transparent: fantasma,
+      opacity: fantasma ? 0.35 : 1,
+      depthWrite: !fantasma,
     });
     // Triângulos menores que um pixel dão normal inválida (vira ponto preto).
     // Nesse caso usamos uma normal virada para a câmera.
@@ -203,17 +262,90 @@ export class Visualizador {
         ),
       );
     };
-    this.peca = new THREE.Mesh(geo, mat);
-    this.peca.castShadow = !!this.perfil.sombras;
-    this.peca.name = 'peca';
-    this.grupoModelo.add(this.peca);
-    this.grupoModelo.position.set(-(x0 + x1) / 2, -(y0 + y1) / 2, -z0);
-    this.caixa = caixa;
-    this.trianguloNaTela = malhaTela.indices.length / 3;
-    this.bytesGpu = malhaTela.posicoes.byteLength + malhaTela.indices.byteLength;
-    this._ajustarSombra();
-    if (enquadrarDepois) this.enquadrar('iso');
-    else this.desenhar();
+    this._materiais.set(chave, mat);
+    return mat;
+  }
+
+  _descartarMateriais() {
+    if (!this._materiais) return;
+    for (const m of this._materiais.values()) m.dispose();
+    this._materiais.clear();
+  }
+
+  /** Cores das partes na tela (para os testes): [{ cor, triangulos }]. */
+  coresNaTela() {
+    if (!this.peca) return [];
+    const mats = Array.isArray(this.peca.material) ? this.peca.material : [this.peca.material];
+    const geo = this.peca.geometry;
+    const grupos = geo.groups.length ? geo.groups : [{ start: 0, count: geo.index.count, materialIndex: 0 }];
+    const soma = new Map();
+    for (const g of grupos) {
+      const cor = `#${mats[g.materialIndex].color.getHexString().toUpperCase()}`;
+      soma.set(cor, (soma.get(cor) || 0) + g.count / 3);
+    }
+    return [...soma].map(([cor, triangulos]) => ({ cor, triangulos }));
+  }
+
+  /**
+   * Foto quadrada da peça (PNG), para a miniatura do 3MF quando o arquivo não tem uma.
+   * Vista 3D, fundo transparente, sem a mesa.
+   */
+  async capturarMiniatura(lado = 512) {
+    if (!this.peca || !this.caixa) return null;
+    const alvo = new THREE.WebGLRenderTarget(lado, lado);
+    const cam = new THREE.PerspectiveCamera(this.camera.fov, 1, 1, 5000);
+    cam.add(...this.camera.children.map((c) => c.clone()));
+    const [sx, sy, sz] = this.caixa.tamanho;
+    const centro = new THREE.Vector3(0, 0, sz / 2);
+    const raio = Math.max(0.5 * Math.hypot(sx, sy, sz), 1);
+    const dist = (raio / Math.sin(THREE.MathUtils.degToRad(cam.fov) / 2)) * 1.02;
+    cam.near = Math.max(0.05, dist / 500);
+    cam.far = dist * 40 + 2000;
+    cam.position.copy(centro).addScaledVector(VISTAS.iso.clone().normalize(), dist);
+    cam.lookAt(centro);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+    this.cena.add(cam);
+    const mesa = this.cena.getObjectByName('mesa');
+    const estavam = [mesa.visible, this.sombra.visible];
+    mesa.visible = false;
+    this.sombra.visible = false;
+    const fundo = this.renderer.getClearColor(new THREE.Color());
+    const alfa = this.renderer.getClearAlpha();
+    const px = new Uint8Array(lado * lado * 4);
+    try {
+      this.renderer.setClearColor(0x000000, 0);
+      this.renderer.setRenderTarget(alvo);
+      this.renderer.render(this.cena, cam);
+      this.renderer.readRenderTargetPixels(alvo, 0, 0, lado, lado, px);
+    } finally {
+      this.renderer.setRenderTarget(null);
+      this.renderer.setClearColor(fundo, alfa);
+      [mesa.visible, this.sombra.visible] = estavam;
+      this.cena.remove(cam);
+      alvo.dispose();
+      this.desenhar();
+    }
+    // A imagem sai de cabeça para baixo e em cor linear: ajusta para PNG normal (sRGB).
+    const tabela = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      const l = i / 255;
+      tabela[i] = Math.round(255 * (l <= 0.0031308 ? 12.92 * l : 1.055 * l ** (1 / 2.4) - 0.055));
+    }
+    const img = new ImageData(lado, lado);
+    for (let y = 0; y < lado; y++) {
+      const de = (lado - 1 - y) * lado * 4, para = y * lado * 4;
+      for (let k = 0; k < lado * 4; k += 4) {
+        img.data[para + k] = tabela[px[de + k]];
+        img.data[para + k + 1] = tabela[px[de + k + 1]];
+        img.data[para + k + 2] = tabela[px[de + k + 2]];
+        img.data[para + k + 3] = px[de + k + 3];
+      }
+    }
+    const tela = new OffscreenCanvas(lado, lado);
+    tela.getContext('2d').putImageData(img, 0, 0);
+    const blob = await tela.convertToBlob({ type: 'image/png' });
+    return new Uint8Array(await blob.arrayBuffer());
   }
 
   _ajustarSombra() {

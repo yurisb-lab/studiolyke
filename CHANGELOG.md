@@ -1,5 +1,20 @@
 # Mudanças
 
+## v0.0.2 — Etapa 1.2: 3MF ida e volta (27/11/2026)
+
+- **Lê tudo o que o Bambu Studio guarda no 3MF:** objetos e as partes de cada um (com nome, tipo e posição), filamentos do projeto (cor, tipo, perfil), filamento de cada objeto e de cada parte, placas (nome, travada, objetos de cada uma), ajustes por objeto e por parte (brim, suporte, paredes…), configurações do projeto e miniaturas.
+- **Cada parte aparece na cor do seu filamento.** Modificadores e partes negativas aparecem transparentes; objetos que não imprimem ficam apagados.
+- **Painel novo:** paleta dos filamentos e lista por placa → objeto → parte, com o filamento de cada parte. Dá para **trocar o filamento de uma parte** ali mesmo (num objeto de uma parte só, o objeto acompanha, como no Bambu). A troca entra no histórico (desfazer) na etapa 1.4.
+- **Exportar 3MF** (botão no painel Arquivo, "Exportar" na barra do celular, Ctrl+E no computador e no menu de segurar). O arquivo sai no formato de projeto do Bambu Studio: objetos, partes, filamento por parte, placas, ajustes, configurações do projeto e miniatura.
+  - **A pintura do Bambu é guardada como veio e volta igual** (cor, suporte e costura pintados). Ela ainda não aparece na tela; isso é a etapa 1.3.
+  - As coordenadas voltam exatamente como o Bambu as lê: fatiando o smile original e o exportado no Bambu Studio 02.08.02.61, os gramas de cada filamento em cada placa dão iguais.
+  - Modelo de STL ou OBJ sai como objetos no filamento 1, no centro da placa 1, apoiados na mesa, com miniatura tirada da tela. Sem configurações do projeto: o Bambu usa as dele.
+  - G-code e resultados de fatiamento antigos não vão junto (ficariam errados).
+  - Modo leve: o arquivo é escrito e comprimido aos pedaços, uma parte por vez, fora da tela. O arco (1,1 milhão de triângulos) exporta em ~2,5 s.
+- "Simplificar ao abrir" agora simplifica parte por parte e mantém objetos, partes, filamentos e placas. A pintura do Bambu, nesse caso, é descartada com aviso.
+- Posições do 3MF guardadas em precisão dupla (sem isso, objetos nas placas 2 e 3 perdiam casas decimais).
+- Testes automáticos novos: ida e volta de um projeto completo (várias partes, modificador, peça espelhada, instâncias repetidas, objeto que não imprime, arquivos extras), do smile e do arco; ZIP; coordenadas; troca de filamento; exportação pelo botão, Ctrl+E e barra do celular, também sem internet; XML conferido pelo leitor estrito do navegador.
+
 ## v0.0.1 — Etapa 1.1: esqueleto e modo leve (27/11/2026)
 
 - Página do app com visualizador 3D (eixo Z para cima, mesa da A1 de 256 × 256 mm com grade de 10 mm).

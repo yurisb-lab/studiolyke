@@ -1,4 +1,5 @@
 // Atalhos de teclado (computador). Os da seleção (W, L, B, G...) entram na etapa 1.5.
+//   Ctrl+O abrir · Ctrl+E exportar 3MF · F enquadrar · 0/1/3/7 vistas
 
 export function ligarAtalhos(acoes) {
   document.addEventListener('keydown', (e) => {
@@ -8,6 +9,11 @@ export function ligarAtalhos(acoes) {
     if (ctrl && e.key.toLowerCase() === 'o') {
       e.preventDefault();
       acoes.abrir();
+      return;
+    }
+    if (ctrl && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      acoes.exportar();
       return;
     }
     if (ctrl || e.altKey) return;

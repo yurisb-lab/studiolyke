@@ -1,11 +1,13 @@
-// Worker de carregamento: lê o arquivo, monta a malha compacta e gera a malha leve da tela.
-// Roda fora da tela para a página não travar. Cada tarefa usa um worker novo, que é
+// Worker de processamento: lê o arquivo, monta a malha compacta, gera a malha leve
+// da tela e grava o 3MF. Roda fora da tela para a página não travar. Cada tarefa usa um worker novo, que é
 // encerrado no fim: assim a memória de trabalho (inclusive a do WASM) é devolvida.
 
 import { CDN } from '../config.js';
 import { lerStl } from '../io/stl.js';
 import { lerObj } from '../io/obj.js';
 import { ler3mf } from '../io/3mf.js';
+import { gravar3mf } from '../io/3mf-gravar.js';
+import { garantirEstrutura } from '../core/projeto.js';
 import { caixaDaMalha, caixasDosObjetos, transferiveis } from '../core/malha.js';
 import { malhaDaTela, simplificarMalha } from '../core/simplificar.js';
 
@@ -48,6 +50,7 @@ async function abrir(id, { arquivo, limiteTela, simplificarPara }) {
     buffer = null;
   }
   if (malha.indices.length === 0) throw new Error('O arquivo não tem nenhum triângulo.');
+  garantirEstrutura(malha);
   const trianguloOriginal = malha.indices.length / 3;
   if (simplificarPara && trianguloOriginal > simplificarPara) {
     avisar(id, 'Simplificando o modelo…', 0);
@@ -73,11 +76,32 @@ async function refazerTela(id, { malha, limiteTela }) {
   postMessage({ id, tipo: 'pronto', malha, tela }, transferiveis(malha, tela));
 }
 
+/**
+ * Recebe a malha emprestada (transferida), grava o 3MF aos pedaços e devolve
+ * o arquivo pronto (Blob) junto com a malha.
+ */
+async function exportar(id, { malha, miniatura }) {
+  avisar(id, 'Gravando o 3MF…', 0);
+  let r;
+  try {
+    r = await gravar3mf(malha, { miniatura, aoProgresso: (fase, f) => avisar(id, fase, f) });
+  } catch (erro) {
+    // devolve a malha mesmo com erro, para o app não perder o modelo
+    postMessage({ id, tipo: 'pronto', malha, erro: erro && erro.message ? erro.message : String(erro) }, transferiveis(malha));
+    return;
+  }
+  avisar(id, 'Terminando o arquivo…', 1);
+  const arquivo = new Blob(r.pedacos, { type: 'model/3mf' });
+  r.pedacos.length = 0;
+  postMessage({ id, tipo: 'pronto', malha, arquivo, info: r.info }, transferiveis(malha));
+}
+
 self.onmessage = async (e) => {
   const { id, tipo, dados } = e.data;
   try {
     if (tipo === 'abrir') await abrir(id, dados);
     else if (tipo === 'tela') await refazerTela(id, dados);
+    else if (tipo === 'exportar') await exportar(id, dados);
     else throw new Error(`Tarefa desconhecida: ${tipo}`);
   } catch (erro) {
     postMessage({ id, tipo: 'erro', mensagem: erro && erro.message ? erro.message : String(erro) });
