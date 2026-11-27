@@ -10,3 +10,13 @@ Rodar: `npm install` e depois `npm test`.
 ## Conferência no Bambu Studio de verdade (fora do `npm test`)
 
 Na etapa 1.2 os 3MF exportados também foram fatiados no Bambu Studio 02.08.02.61 para Linux (linha de comando `--slice 0`), comparando gramas por filamento e por placa com o arquivo original. Isso não faz parte do `npm test` (o Bambu tem ~230 MB e licença AGPL; só é usado como ferramenta, sem copiar código).
+
+Resultado na v0.0.2 (gramas por placa, filamento entre parênteses):
+
+| Modelo | Original | Exportado pelo app |
+| --- | --- | --- |
+| Smile, placa 1 / 2 / 3 | 69,05 (2) · 26,81 (2) + 73,52 (4) · 15,19 (4) | igual |
+| Arco, placas 1 a 9 | 157,16 · 159,71 · 154,24 · 66,28 · 67,19 · 67,53 · 67,18 · 66,27 · 236,85 | igual |
+
+O tempo estimado varia um pouco a cada fatiamento **do mesmo arquivo** (no arco, até ~2% entre duas fatiadas do original), então o tempo não serve para comparar; os gramas, sim.
+
