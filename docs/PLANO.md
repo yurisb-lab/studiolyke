@@ -250,7 +250,7 @@ A implementação anda em etapas pequenas, cada uma com uma entrega testável no
 - **Você testa no seu PC e imprime** as peças de validação; o retorno decide se a etapa fecha.
 - **Publicação sem terminal**, pelo Claude Code na nuvem: cada etapa vira uma branch; você revisa as mudanças, cria o PR e clica em Merge no GitHub. O GitHub Pages atualiza o app sozinho.
 - **Uma etapa por sessão** do Claude Code. Este plano fica no repositório como docs/PLANO.md e o CLAUDE.md guarda as regras; no fim de cada etapa o Claude Code marca o que ficou pronto.
-- **Versões numeradas** (v0.1, v0.2…) com a lista de mudanças dentro do app; o GitHub guarda as anteriores para voltar se algo der errado.
+- **Versões numeradas** (v0.1, v0.2…) com a lista de mudanças dentro do app; o GitHub guarda as anteriores para voltar se algo der errado. Dentro da fase 1, cada etapa sobe um número (v0.0.1, v0.0.2…) até a v0.1 no fim da fase.
 
 ### Estrutura do repositório
 
@@ -268,13 +268,13 @@ A implementação anda em etapas pequenas, cada uma com uma entrega testável no
 ### Etapa 0 — Preparação
 
 - [ ] Escolher o nome do app e criar o repositório no GitHub, com o Pages ligado.
-- [ ] Conectar o GitHub no claude.ai/code e subir o CLAUDE.md e o docs/PLANO.md no repositório.
+- [x] Conectar o GitHub no claude.ai/code e subir o CLAUDE.md e o docs/PLANO.md no repositório.
 - [ ] Separar os arquivos de teste: o boneco smile pintado no Bambu Studio (3MF), o arco rendilhado, um chaveiro de 2 cores e uma figura com peças separadas.
 - [ ] Anotar o modelo do seu PC e o navegador usado, para calibrar o modo leve.
 
 ### Fase 1 — Fundação (sai a v0.1)
 
-1. **Esqueleto e modo leve:** página, visualizador, abrir STL/OBJ/3MF, malha leve na tela, medidor de memória, layout responsivo e gestos de toque. Pronto quando: o arco e o smile abrem no seu PC sem travar.
+1. **Esqueleto e modo leve:** página, visualizador, abrir STL/OBJ/3MF, malha leve na tela, medidor de memória, layout responsivo e gestos de toque. Pronto quando: o arco e o smile abrem no seu PC sem travar. — ✅ **Feita na v0.0.1** (27/11/2026). Testes automáticos passando; falta só a confirmação do Yuri com o arco e o smile no PC e no S23 Ultra.
 2. **3MF ida e volta:** ler objetos, partes e filamentos; exportar no formato do Bambu Studio. Pronto quando: um 3MF reaberto no Bambu fica igual ao original.
 3. **Pintura do Bambu:** decodificar e regravar a pintura fina. Pronto quando: o smile vai e volta sem perder nenhuma cor.
 4. **Histórico:** operações editáveis, desfazer, salvar e abrir projeto, pela camada de armazenamento única (local agora, Google Drive depois).

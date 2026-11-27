@@ -1,0 +1,15 @@
+{
+  "name": "fatiador-lyke-3d-testes",
+  "private": true,
+  "description": "Só para os testes automáticos. O app não usa Node nem build.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test testes/unidade/*.test.mjs && node testes/navegador/rodar.mjs"
+  },
+  "devDependencies": {
+    "jszip": "3.10.2",
+    "meshoptimizer": "1.3.0",
+    "playwright": "1.63.0",
+    "three": "0.187.0"
+  }
+}
