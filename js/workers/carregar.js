@@ -6,7 +6,7 @@ import { CDN } from '../config.js';
 import { lerStl } from '../io/stl.js';
 import { lerObj } from '../io/obj.js';
 import { ler3mf } from '../io/3mf.js';
-import { caixaDaMalha, transferiveis } from '../core/malha.js';
+import { caixaDaMalha, caixasDosObjetos, transferiveis } from '../core/malha.js';
 import { malhaDaTela, simplificarMalha } from '../core/simplificar.js';
 
 let meshopt = null;
@@ -57,6 +57,7 @@ async function abrir(id, { arquivo, limiteTela, simplificarPara }) {
   malha.nome = nome;
   malha.trianguloOriginal = trianguloOriginal;
   const caixa = caixaDaMalha(malha);
+  caixasDosObjetos(malha).forEach((t, i) => { malha.objetos[i].tamanho = t; });
   postMessage({ id, tipo: 'pronto', malha, tela, caixa }, transferiveis(malha, tela));
 }
 

@@ -148,15 +148,16 @@ async function abrirModelo(pagina, caminho, { esperarDialogo = false } = {}) {
   const t0 = Date.now();
   await pagina.setInputFiles('#entrada-arquivo', caminho);
   if (esperarDialogo) return;
-  await esperarCarregar(pagina);
+  await esperarCarregar(pagina, caminho.split(/[\\/]/).pop());
   return Date.now() - t0;
 }
 
-async function esperarCarregar(pagina) {
-  await pagina.waitForFunction(() => {
+async function esperarCarregar(pagina, nome = null) {
+  await pagina.waitForFunction((n) => {
     const e = window.__fatiador.estado;
-    return !e.ocupado && (e.malha || document.querySelector('.aviso-rapido.erro'));
-  }, null, { timeout: 120000 });
+    const certo = e.malha && (!n || e.malha.nome === n);
+    return !e.ocupado && (certo || document.querySelector('.aviso-rapido.erro'));
+  }, nome, { timeout: 120000 });
   await pagina.waitForTimeout(100);
 }
 
@@ -486,6 +487,9 @@ async function principal() {
         const ms = await abrirModelo(pagina, join(pastaModelos, nome));
         const e = await estado(pagina);
         confere(e.triangulos > 0 && !e.erroVisivel, `${nome}: ${e.triangulos} triângulos, ${e.naTela} na tela, ${(ms / 1000).toFixed(1)} s, ${e.totalMB.toFixed(0)} MB`, e.erroVisivel);
+        const selo = await pagina.textContent('#conteudo-modelo .selo');
+        console.log(`      mesa: ${selo}`);
+        if (/arco|smile/i.test(nome)) confere(/^Cab|^Cada objeto cabe/.test(selo), `${nome}: cada peça cabe na mesa da A1`, selo);
         await pagina.screenshot({ path: join(RESULTADOS, `modelo-${nome}.png`) });
       }
       confere(erros.length === 0, 'sem erros no console', erros.join(' | '));

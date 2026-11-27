@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { malhaDaTela, simplificarMalha } from '../../js/core/simplificar.js';
-import { criarMalha, caixaDaMalha, transferiveis, compactar } from '../../js/core/malha.js';
+import { criarMalha, caixaDaMalha, caixasDosObjetos, transferiveis, compactar } from '../../js/core/malha.js';
 import { esfera } from '../gerar-modelos.mjs';
 
 await MeshoptSimplifier.ready;
@@ -60,4 +60,13 @@ test('compactar remove vértices não usados', () => {
   const c = compactar(pos, new Uint32Array([0, 2, 3]));
   assert.equal(c.posicoes.length, 9);
   assert.deepEqual(Array.from(c.indices), [0, 1, 2]);
+});
+
+test('medidas de cada objeto', () => {
+  const a = esfera(10, 8, 16, [0, 0, 10]);
+  const m = criarMalha({ posicoes: a.posicoes, indices: a.indices, objetos: [
+    { nome: 'A', primeiroTriangulo: 0, numTriangulos: a.indices.length / 3 },
+  ] });
+  const [t] = caixasDosObjetos(m);
+  for (const v of t) assert.ok(Math.abs(v - 20) < 0.5);
 });

@@ -269,12 +269,12 @@ A implementação anda em etapas pequenas, cada uma com uma entrega testável no
 
 - [ ] Escolher o nome do app e criar o repositório no GitHub, com o Pages ligado.
 - [x] Conectar o GitHub no claude.ai/code e subir o CLAUDE.md e o docs/PLANO.md no repositório.
-- [ ] Separar os arquivos de teste: o boneco smile pintado no Bambu Studio (3MF), o arco rendilhado, um chaveiro de 2 cores e uma figura com peças separadas.
+- [ ] Separar os arquivos de teste: o boneco smile pintado no Bambu Studio (3MF), o arco rendilhado, um chaveiro de 2 cores e uma figura com peças separadas. *(smile e arco já em `testes/modelos/`; faltam o chaveiro de 2 cores e a figura com peças separadas)*
 - [ ] Anotar o modelo do seu PC e o navegador usado, para calibrar o modo leve.
 
 ### Fase 1 — Fundação (sai a v0.1)
 
-1. **Esqueleto e modo leve:** página, visualizador, abrir STL/OBJ/3MF, malha leve na tela, medidor de memória, layout responsivo e gestos de toque. Pronto quando: o arco e o smile abrem no seu PC sem travar. — ✅ **Feita na v0.0.1** (27/11/2026). Testes automáticos passando; falta só a confirmação do Yuri com o arco e o smile no PC e no S23 Ultra.
+1. **Esqueleto e modo leve:** página, visualizador, abrir STL/OBJ/3MF, malha leve na tela, medidor de memória, layout responsivo e gestos de toque. Pronto quando: o arco e o smile abrem no seu PC sem travar. — ✅ **Feita na v0.0.1** (27/11/2026). Testes automáticos passando, inclusive abrindo o arco (1,1 milhão de triângulos, ~1,6 s) e o smile (553 mil, ~1 s) no perfil do PC de 4 GB; falta a confirmação do Yuri no PC e no S23 Ultra de verdade.
 2. **3MF ida e volta:** ler objetos, partes e filamentos; exportar no formato do Bambu Studio. Pronto quando: um 3MF reaberto no Bambu fica igual ao original.
 3. **Pintura do Bambu:** decodificar e regravar a pintura fina. Pronto quando: o smile vai e volta sem perder nenhuma cor.
 4. **Histórico:** operações editáveis, desfazer, salvar e abrir projeto, pela camada de armazenamento única (local agora, Google Drive depois).
