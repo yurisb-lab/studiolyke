@@ -9,6 +9,9 @@ Rodar: `npm install` e depois `npm test`.
 
 ## Conferência no Bambu Studio de verdade (fora do `npm test`)
 
+**Pintura fina (v0.0.3):** o Yuri abriu `modelos/conferencia_pintura.3mf` no Bambu Studio 02.08.02.61 do PC (28/11/2026). O desenho bateu com o do app: F azul em cima legível (ao contrário no cubo espelhado), triângulo azul na frente com a ponta no centro e cantinho bege em cima à esquerda (à direita no espelhado). Isso confirma as divisões de 1, 2 e 3 lados, a ordem dos filhos e o lado especial.
+
+
 Na etapa 1.2 os 3MF exportados também foram fatiados no Bambu Studio 02.08.02.61 para Linux (linha de comando `--slice 0`), comparando gramas por filamento e por placa com o arquivo original. Isso não faz parte do `npm test` (o Bambu tem ~230 MB e licença AGPL; só é usado como ferramenta, sem copiar código).
 
 Resultado na v0.0.2 (gramas por placa, filamento entre parênteses):
