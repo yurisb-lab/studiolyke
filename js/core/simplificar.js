@@ -35,9 +35,9 @@ export function simplificarIndices(Meshopt, posicoes, indices, alvoTriangulos, o
 export function malhaDaTela(Meshopt, malha, alvoTriangulos) {
   const faixas = faixasDasPartes(malha);
   const total = malha.indices.length / 3;
-  if (total <= alvoTriangulos) return { ...compactar(malha.posicoes, malha.indices), faixas };
+  if (total <= alvoTriangulos) return { ...compactar(malha.posicoes, malha.indices, { comOrigem: true }), faixas };
   const { indices, faixas: novas } = simplificarPorFaixa(Meshopt, malha, faixas, alvoTriangulos / total, {});
-  return { ...compactar(malha.posicoes, semTriangulosFinos(malha.posicoes, indices, novas)), faixas: novas };
+  return { ...compactar(malha.posicoes, semTriangulosFinos(malha.posicoes, indices, novas), { comOrigem: true }), faixas: novas };
 }
 
 /**

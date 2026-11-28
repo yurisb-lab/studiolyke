@@ -1,10 +1,14 @@
-// Atalhos de teclado (computador). Os da seleção (W, L, B, G...) entram na etapa 1.5.
-//   Ctrl+O abrir · Ctrl+E exportar 3MF · F enquadrar · 0/1/3/7 vistas · P mostrar/esconder a pintura
+// Atalhos de teclado (computador).
+//   Ctrl+O abrir · Ctrl+E exportar 3MF · Ctrl+S salvar projeto
+//   Ctrl+Z desfazer · Ctrl+Y ou Ctrl+Shift+Z refazer
+//   F enquadrar · 0/1/3/7 vistas · P mostrar/esconder a pintura
+//   Seleção: W varinha · L laço · Ctrl+D limpar · Ctrl+A tudo · Ctrl+I inverter
 
 export function ligarAtalhos(acoes) {
   document.addEventListener('keydown', (e) => {
     const alvo = e.target;
     if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA' || alvo.isContentEditable)) return;
+    if (document.querySelector('dialog[open]')) return;
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && e.key.toLowerCase() === 'o') {
       e.preventDefault();
@@ -16,9 +20,33 @@ export function ligarAtalhos(acoes) {
       acoes.exportar();
       return;
     }
+    if (ctrl && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      if (acoes.salvar) acoes.salvar();
+      return;
+    }
+    if (ctrl && !e.altKey && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      if (acoes.refazer) acoes.refazer();
+      return;
+    }
+    if (ctrl && !e.altKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (acoes.desfazer) acoes.desfazer();
+      return;
+    }
+    const sel = acoes.selecao || {};
+    if (ctrl && !e.altKey && ['d', 'a', 'i'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      const f = { d: sel.limpar, a: sel.tudo, i: sel.inverter }[e.key.toLowerCase()];
+      if (f) f();
+      return;
+    }
     if (ctrl || e.altKey) return;
     const mapa = {
       f: () => acoes.enquadrar(),
+      w: () => sel.ferramenta && sel.ferramenta('varinha'),
+      l: () => sel.ferramenta && sel.ferramenta('laco'),
       p: () => acoes.pintura && acoes.pintura(),
       1: () => acoes.vista('frente'),
       3: () => acoes.vista('lado'),

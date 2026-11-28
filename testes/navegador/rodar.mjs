@@ -35,6 +35,10 @@ const TIPOS = {
   '.wasm': 'application/wasm',
 };
 
+// Rodar só algumas partes: SO="histórico" node testes/navegador/rodar.mjs
+const SO = (process.env.SO || '').toLowerCase();
+const rodar = (nome) => !SO || nome.toLowerCase().includes(SO);
+
 // ---------- mini-asserções ----------
 let falhas = 0, passou = 0;
 function confere(cond, texto, detalhe = '') {
@@ -265,6 +269,113 @@ async function conferirXml(pagina, buffer, rotulo) {
   return zip;
 }
 
+/** Impressão digital da pintura inteira (para conferir "igual letra por letra"). */
+const assinaturaPintura = (pagina) => pagina.evaluate(() => {
+  const c = window.__fatiador.estado.malha.pinturaCor;
+  if (!c) return 'sem';
+  let h = 2166136261;
+  for (const a of [c.codigos, c.inicio]) for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a[i], 16777619);
+  return `${c.codigos.length}:${c.inicio.length}:${h >>> 0}`;
+});
+
+/** Espera o app terminar o que está fazendo (desfazer, refazer…). */
+async function esperarLivre(pagina) {
+  await pagina.waitForTimeout(50);
+  await pagina.waitForFunction(() => !window.__fatiador.estado.ocupado && window.__fatiador.estado.malha, null, { timeout: 120000 });
+  await pagina.waitForTimeout(50);
+}
+
+/** Ponto da tela (clientX, clientY) de um ponto do modelo (mm). */
+const naTela = (pagina, ponto) => pagina.evaluate((p) => {
+  const v = window.__fatiador.visualizador;
+  const V = v.camera.position.constructor;
+  const q = new V(p[0], p[1], p[2]).add(v.grupoModelo.position).project(v.camera);
+  const r = v.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (q.x + 1) / 2 * r.width, y: r.top + (1 - q.y) / 2 * r.height };
+}, ponto);
+
+/** Centro do topo de um objeto (o ponto mais alto do meio dele). */
+async function pontoDoTopo(pagina, objeto) {
+  const p = await pagina.evaluate((io) => {
+    const m = window.__fatiador.estado.malha;
+    const o = m.objetos[io];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let t = o.primeiroTriangulo; t < o.primeiroTriangulo + o.numTriangulos; t++) {
+      for (let k = 0; k < 3; k++) {
+        const v = m.indices[t * 3 + k] * 3;
+        x0 = Math.min(x0, m.posicoes[v]); x1 = Math.max(x1, m.posicoes[v]);
+        y0 = Math.min(y0, m.posicoes[v + 1]); y1 = Math.max(y1, m.posicoes[v + 1]);
+        z1 = Math.max(z1, m.posicoes[v + 2]);
+      }
+    }
+    return [(x0 + x1) / 2 + (x1 - x0) * 0.3, (y0 + y1) / 2 + (y1 - y0) * 0.3, z1];
+  }, objeto);
+  return naTela(pagina, p);
+}
+
+/** Caixa (na tela) do topo de um objeto. */
+async function caixaNaTela(pagina, objeto) {
+  const cantos = await pagina.evaluate((io) => {
+    const m = window.__fatiador.estado.malha;
+    const o = m.objetos[io];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let t = o.primeiroTriangulo; t < o.primeiroTriangulo + o.numTriangulos; t++) {
+      for (let k = 0; k < 3; k++) {
+        const v = m.indices[t * 3 + k] * 3;
+        x0 = Math.min(x0, m.posicoes[v]); x1 = Math.max(x1, m.posicoes[v]);
+        y0 = Math.min(y0, m.posicoes[v + 1]); y1 = Math.max(y1, m.posicoes[v + 1]);
+        z1 = Math.max(z1, m.posicoes[v + 2]);
+      }
+    }
+    return [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+  }, objeto);
+  const pts = [];
+  for (const c of cantos) pts.push(await naTela(pagina, c));
+  return { x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), y1: Math.max(...pts.map((p) => p.y)) };
+}
+
+/** Um ponto da pintura de cor "estado" (pintura fina) no topo de um objeto. */
+async function pontoDaCor(pagina, objeto, estadoCor) {
+  const p = await pagina.evaluate(async ([io, e]) => {
+    const { pedacos } = await import('./js/io/pintura-bambu.js');
+    const { corSimples } = await import('./js/core/pintura.js');
+    const m = window.__fatiador.estado.malha;
+    const o = m.objetos[io];
+    const cor = m.pinturaCor;
+    let melhor = null;
+    for (let t = o.primeiroTriangulo; t < o.primeiroTriangulo + o.numTriangulos; t++) {
+      if (corSimples(cor, t) !== -1) continue;
+      const v = (k) => { const q = m.indices[t * 3 + k] * 3; return [m.posicoes[q], m.posicoes[q + 1], m.posicoes[q + 2]]; };
+      pedacos(cor.codigos, cor.inicio[t], cor.inicio[t + 1], v(0), v(1), v(2), (es, x0, y0, z0, x1, y1, z1, x2, y2, z2) => {
+        const a = Math.abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0));
+        const z = (z0 + z1 + z2) / 3;
+        if (es === e && (!melhor || z > melhor.z + 1e-6 || (Math.abs(z - melhor.z) < 1e-6 && a > melhor.a))) melhor = { p: [(x0 + x1 + x2) / 3, (y0 + y1 + y2) / 3, z], z, a };
+      });
+    }
+    return melhor && melhor.p;
+  }, [objeto, estadoCor]);
+  return naTela(pagina, p);
+}
+
+const infoSelecao = (pagina) => pagina.evaluate(() => {
+  const f = window.__fatiador;
+  const r = f.estado.sel.resumo;
+  const m = f.estado.malha, sel = f.estado.sel.mascara;
+  let fundo = false;
+  const objetos = new Set();
+  if (sel) {
+    for (let t = 0; t < sel.length; t++) {
+      if (!sel[t]) continue;
+      const i = m.indices, p = m.posicoes;
+      const a = i[t * 3] * 3, b = i[t * 3 + 1] * 3, c = i[t * 3 + 2] * 3;
+      const nz = (p[b] - p[a]) * (p[c + 1] - p[a + 1]) - (p[b + 1] - p[a + 1]) * (p[c] - p[a]);
+      if (nz < -1e-9 && Math.max(p[a + 2], p[b + 2], p[c + 2]) - Math.min(p[a + 2], p[b + 2], p[c + 2]) < 1e-6) fundo = true;
+      objetos.add(m.objetos.findIndex((o) => t >= o.primeiroTriangulo && t < o.primeiroTriangulo + o.numTriangulos));
+    }
+  }
+  return { triangulos: r ? r.triangulos : 0, pedacos: r ? r.pedacos : 0, destacados: f.visualizador.triangulosDestacados(), fundo, objetos: [...objetos].join() };
+});
+
 const coresNaTela = (pagina) => pagina.evaluate(() => window.__fatiador.visualizador.coresNaTela().map((c) => c.cor));
 
 // ---------- toque (Chrome DevTools Protocol) ----------
@@ -300,7 +411,7 @@ async function principal() {
   try {
     // ---------------- PC de 4 GB ----------------
     console.log('\n[PC de 4 GB]');
-    {
+    if (rodar('PC de 4 GB')) {
       const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.pc4gb);
       confere(await pagina.textContent('#versao') === VERSAO, `mostra a versão ${VERSAO}`);
       confere(await pagina.isDisabled('.painel [data-acao="exportar"]'), 'Exportar 3MF desligado sem modelo');
@@ -479,9 +590,279 @@ async function principal() {
       await contexto.close();
     }
 
+    // ---------------- histórico e projetos (etapa 1.4) ----------------
+    console.log('\n[histórico e projetos]');
+    if (rodar('histórico e projetos (etapa 1.4)')) {
+      const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.pc4gb);
+      await abrirModelo(pagina, arq.conferencia);
+      const original = await assinaturaPintura(pagina);
+      confere(await pagina.locator('#lista-historico .passo').count() === 1, 'histórico começa com "Modelo aberto"');
+      confere(await pagina.isDisabled('.topo [data-acao="desfazer"]'), 'Desfazer desligado sem passos');
+      await pagina.selectOption('#pintura-de', '3');
+      await pagina.selectOption('#pintura-para', '1');
+      await pagina.selectOption('#pintura-onde', '');
+      await pagina.click('#pintura-trocar');
+      let e = await estado(pagina);
+      confere(e.pintura.estados.join() === '1,2' && await pagina.locator('#lista-historico .passo').count() === 2, 'troca de cor vira um passo do histórico');
+      await pagina.selectOption('.seletor-filamento[data-objeto="0"][data-parte="0"]', '3');
+      confere(await pagina.locator('#lista-historico .passo').count() === 3, 'troca de filamento vira outro passo');
+      await pagina.keyboard.press('Control+z');
+      await esperarLivre(pagina);
+      confere(await pagina.evaluate(() => window.__fatiador.estado.malha.objetos[0].partes[0].extrusora) !== 3, 'Ctrl+Z desfaz o filamento');
+      const t0 = Date.now();
+      await pagina.click('.topo [data-acao="desfazer"]');
+      await esperarLivre(pagina);
+      const msDesfazer = Date.now() - t0;
+      e = await estado(pagina);
+      let cores = await coresNaTela(pagina);
+      confere(e.pintura.estados.join() === '2,3' && cores.includes('#D9C49A') && await assinaturaPintura(pagina) === original,
+        `botão Desfazer volta a pintura igual letra por letra e a cor na tela (${msDesfazer} ms)`);
+      confere(await pagina.locator('#lista-historico .passo.futuro').count() === 2, 'passos desfeitos ficam riscados (para refazer)');
+      await pagina.keyboard.press('Control+y');
+      await esperarLivre(pagina);
+      e = await estado(pagina);
+      confere(e.pintura.estados.join() === '1,2', 'Ctrl+Y refaz');
+      // editar o passo 1: a cor 3 vai para o filamento 2 em vez do 1
+      await pagina.click('[data-editar-passo="0"]');
+      await pagina.selectOption('.editor-passo [data-campo="para"]', '2');
+      await pagina.click('[data-aplicar-edicao]');
+      await esperarLivre(pagina);
+      e = await estado(pagina);
+      confere(e.pintura.estados.join() === '2' && /→ 2/.test(await pagina.textContent('#lista-historico')), 'editar um passo antigo refaz o modelo com a receita nova');
+      // tocar no "Modelo aberto" volta ao começo; tocar no último vai até o fim
+      await pagina.click('[data-ir="0"]');
+      await esperarLivre(pagina);
+      confere(await assinaturaPintura(pagina) === original, 'tocar em "Modelo aberto" volta ao original');
+      await pagina.click('[data-ir="2"]');
+      await esperarLivre(pagina);
+      e = await estado(pagina);
+      confere(e.pintura.estados.join() === '2' && await pagina.evaluate(() => window.__fatiador.estado.malha.objetos[0].partes[0].extrusora) === 3, 'tocar no último passo refaz tudo');
+      await pagina.screenshot({ path: join(RESULTADOS, 'historico.png') });
+      const exportado = await exportar(pagina, () => pagina.click('.painel [data-acao="exportar"]'));
+      const volta = await ler3mf(exportado.buffer, JSZip);
+      confere(volta.objetos[0].partes[0].extrusora === 3 && !volta.pinturaCor.codigos.includes(3 << 2), 'o 3MF exportado sai com os passos do histórico');
+      // salvar projeto com nome
+      await pagina.keyboard.press('Control+s');
+      await pagina.waitForSelector('#dialogo-nome[open]');
+      await pagina.fill('#nome-valor', 'Conferência de pintura');
+      await pagina.press('#nome-valor', 'Enter');
+      await pagina.waitForFunction(() => window.__fatiador.estado.projeto.id, null, { timeout: 10000 });
+      confere((await pagina.textContent('#info-historico')).includes('Conferência de pintura'), 'Ctrl+S salva o projeto com nome');
+      // recarregar: oferece continuar de onde parou
+      await pagina.reload();
+      await pagina.waitForSelector('#dialogo-confirmar[open]', { timeout: 30000 });
+      confere(/Continuar de onde parou/.test(await pagina.textContent('#confirmar-titulo')), 'ao reabrir o app pergunta "Continuar de onde parou?"');
+      await pagina.click('#confirmar-sim');
+      await esperarCarregar(pagina);
+      e = await estado(pagina);
+      confere(e.pintura && e.pintura.estados.join() === '2' && await pagina.locator('#lista-historico .passo').count() === 3
+        && await pagina.evaluate(() => window.__fatiador.estado.projeto.id !== null), 'continuou com os mesmos passos e o mesmo projeto');
+      await pagina.keyboard.press('Control+z');
+      await esperarLivre(pagina);
+      await pagina.keyboard.press('Control+z');
+      await esperarLivre(pagina);
+      confere(await assinaturaPintura(pagina) === original, 'depois de recarregar ainda dá para desfazer até o original');
+      await pagina.keyboard.press('Control+y');
+      await esperarLivre(pagina);
+      await pagina.keyboard.press('Control+y');
+      await esperarLivre(pagina);
+      // lista de projetos e .lyke
+      await pagina.click('.painel [data-acao="projetos"]');
+      await pagina.waitForSelector('#dialogo-projetos[open]');
+      confere(await pagina.locator('.lista-projetos li').count() === 1, 'Projetos salvos lista o projeto');
+      const [dl] = await Promise.all([pagina.waitForEvent('download'), pagina.click('[data-baixar-projeto]')]);
+      const caminhoLyke = join(RESULTADOS, dl.suggestedFilename());
+      await dl.saveAs(caminhoLyke);
+      confere(/\.lyke$/.test(dl.suggestedFilename()), `baixa o projeto como ${dl.suggestedFilename()}`);
+      await pagina.click('#projetos-fechar');
+      // abrir outro modelo com passos não salvos: o trabalho fica guardado como "não salvo"
+      await abrirModelo(pagina, arq.bambu);
+      await pagina.selectOption('.seletor-filamento[data-objeto="0"][data-parte="0"]', '2');
+      await pagina.waitForTimeout(900);
+      await abrirModelo(pagina, arq.esferaStl);
+      await pagina.click('.painel [data-acao="projetos"]');
+      await pagina.waitForSelector('#dialogo-projetos[open]');
+      confere(await pagina.locator('.lista-projetos li').count() === 2 && (await pagina.textContent('#lista-projetos')).includes('não salvo'), 'trabalho sem nome não se perde ao abrir outro modelo');
+      await pagina.click('[data-abrir-projeto]:first-of-type');
+      await esperarCarregar(pagina);
+      e = await estado(pagina);
+      confere(e.objetos.length === 2 && await pagina.evaluate(() => window.__fatiador.estado.malha.objetos[0].partes[0].extrusora) === 2, 'abrir um projeto da lista volta com os passos');
+      confere(erros.length === 0, 'sem erros no console', erros.join(' | '));
+      await contexto.close();
+
+      // o .lyke no celular (outro aparelho, outro navegador)
+      const cel = await abrirApp(navegador, base, APARELHOS.s23);
+      await cel.pagina.setInputFiles('#entrada-arquivo', caminhoLyke);
+      await esperarCarregar(cel.pagina);
+      e = await estado(cel.pagina);
+      confere(e.pintura && e.pintura.estados.join() === '2' && await cel.pagina.evaluate(() => window.__fatiador.estado.historico.passos.length) === 2, 'o .lyke abre no S23 com os mesmos passos');
+      await cel.pagina.locator('.barra-inferior [data-acao="desfazer"]').tap();
+      await esperarLivre(cel.pagina);
+      await cel.pagina.locator('.barra-inferior [data-acao="desfazer"]').tap();
+      await esperarLivre(cel.pagina);
+      confere(await assinaturaPintura(cel.pagina) === original, 'no celular, Desfazer da barra de baixo volta ao original');
+      await cel.pagina.screenshot({ path: join(RESULTADOS, 'historico-celular.png') });
+      confere(cel.erros.length === 0, 'sem erros no console', cel.erros.join(' | '));
+      await cel.contexto.close();
+    }
+
+    // ---------------- seleção (etapa 1.5) ----------------
+    console.log('\n[seleção]');
+    if (rodar('seleção')) {
+      const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.pc4gb);
+      await abrirModelo(pagina, arq.conferencia);
+      await pagina.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+      await pagina.waitForTimeout(100);
+      const topo1 = await pontoDoTopo(pagina, 0);
+      const topo2 = await pontoDoTopo(pagina, 1);
+      const camAntes = await camera(pagina);
+      // casca
+      await pagina.click('[data-sel-modo="casca"]');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      let s = await infoSelecao(pagina);
+      confere(s.triangulos === 12 && s.destacados > 0, `varinha (casca): clique no cubo pega o cubo inteiro (${s.triangulos} triângulos, ${s.destacados} destacados)`);
+      confere(await pagina.isVisible('#barra-selecao') && (await pagina.textContent('#barra-selecao')).includes('12'), 'barrinha da seleção mostra quanto está selecionado');
+      // Shift soma o outro cubo
+      await pagina.keyboard.down('Shift');
+      await pagina.mouse.click(topo2.x, topo2.y);
+      await pagina.keyboard.up('Shift');
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 24, 'Shift + clique soma o outro cubo');
+      await pagina.keyboard.press('Control+z');
+      await esperarLivre(pagina);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 12, 'Ctrl+Z desfaz a seleção');
+      await pagina.keyboard.press('Control+y');
+      await esperarLivre(pagina);
+      confere((await infoSelecao(pagina)).triangulos === 24, 'Ctrl+Y refaz a seleção');
+      await pagina.keyboard.press('Control+d');
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 0 && s.destacados === 0, 'Ctrl+D limpa (e o destaque some)');
+      // ângulo, só visível: de cima, só o topo
+      await pagina.click('[data-sel-modo="angulo"]');
+      await pagina.fill('#sel-angulo', '95');
+      await pagina.dispatchEvent('#sel-angulo', 'change');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos >= 2 && s.triangulos <= 6 && !s.fundo, `ângulo 95° com "só faces visíveis": de cima pega o topo e o que aparece dos lados, nunca o fundo (${s.triangulos})`);
+      await pagina.uncheck('#sel-visivel');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 12, `sem "só faces visíveis" passa para os lados e o fundo (${s.triangulos})`);
+      await pagina.check('#sel-visivel');
+      // cor: o F pintado no topo (pintura fina): guarda só os pedaços da cor
+      await pagina.click('[data-sel-modo="cor"]');
+      const pontoF = await pontoDaCor(pagina, 0, 2);
+      await pagina.mouse.click(pontoF.x, pontoF.y);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos > 0 && s.pedacos > 0 && /borda da pintura/.test(await pagina.textContent('#info-selecao')), `varinha (cor) no F azul: ${s.triangulos} triângulos, ${s.pedacos} com só os pedaços azuis`);
+      await pagina.screenshot({ path: join(RESULTADOS, 'selecao-cor.png') });
+      // crescer, encolher, inverter
+      await pagina.click('[data-sel-modo="casca"]');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      await pagina.keyboard.press('Control+i');
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 12, 'Ctrl+I inverte (o outro cubo)');
+      await pagina.click('[data-sel-modo="angulo"]');
+      await pagina.fill('#sel-angulo', '30');
+      await pagina.dispatchEvent('#sel-angulo', 'change');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      const soTopo = (await infoSelecao(pagina)).triangulos;
+      await pagina.click('[data-sel-ajuste="crescer"]');
+      const crescido = (await infoSelecao(pagina)).triangulos;
+      await pagina.click('[data-sel-ajuste="encolher"]');
+      s = await infoSelecao(pagina);
+      confere(soTopo === 2 && crescido > soTopo && s.triangulos < crescido, `crescer pega os vizinhos (${soTopo} → ${crescido}) e encolher tira a borda (${s.triangulos})`);
+      await pagina.click('[data-sel-modo="casca"]');
+      // seleção salva
+      await pagina.mouse.click(topo1.x, topo1.y);
+      await pagina.fill('#sel-nome', 'cubo F');
+      await pagina.press('#sel-nome', 'Enter');
+      confere(await pagina.locator('#lista-salvas li').count() === 1, 'salvar a seleção com nome');
+      await pagina.keyboard.press('Control+d');
+      await pagina.click('[data-usar-salva="0"]');
+      confere((await infoSelecao(pagina)).triangulos === 12, '"Usar" traz a seleção salva de volta');
+      // laço com o mouse (não gira a vista)
+      await pagina.keyboard.press('Control+d');
+      await pagina.keyboard.press('l');
+      const caixa1 = await caixaNaTela(pagina, 0);
+      await pagina.mouse.move(caixa1.x0 - 15, caixa1.y0 - 15);
+      await pagina.mouse.down();
+      for (const [x, y] of [[caixa1.x1 + 15, caixa1.y0 - 15], [caixa1.x1 + 15, caixa1.y1 + 15], [caixa1.x0 - 15, caixa1.y1 + 15], [caixa1.x0 - 15, caixa1.y0 - 10]]) {
+        await pagina.mouse.move(x, y, { steps: 8 });
+      }
+      await pagina.mouse.up();
+      s = await infoSelecao(pagina);
+      const camDepois = await camera(pagina);
+      const doLaco = s.triangulos;
+      confere(s.triangulos >= 2 && s.triangulos <= 6 && !s.fundo && s.objetos === '0' && dist(camAntes.p, camDepois.p) < 1e-6, `laço em volta do cubo, de cima: pega só o que aparece dele (${s.triangulos}) e não gira a vista`);
+      await pagina.screenshot({ path: join(RESULTADOS, 'selecao-laco.png') });
+      await pagina.keyboard.press('w');
+      // vai junto com o projeto
+      await pagina.keyboard.press('Control+s');
+      await pagina.waitForSelector('#dialogo-nome[open]');
+      await pagina.press('#nome-valor', 'Enter');
+      await pagina.waitForFunction(() => window.__fatiador.estado.projeto.id, null, { timeout: 10000 });
+      await pagina.evaluate(() => window.__fatiador.salvarAgora());
+      await pagina.reload();
+      await pagina.waitForSelector('#dialogo-confirmar[open]', { timeout: 30000 });
+      await pagina.click('#confirmar-sim');
+      await esperarCarregar(pagina);
+      await pagina.waitForTimeout(200);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === doLaco && s.destacados > 0 && await pagina.locator('#lista-salvas li').count() === 1, 'a seleção atual e as salvas voltam com o projeto');
+      confere(erros.length === 0, 'sem erros no console', erros.join(' | '));
+      await contexto.close();
+
+      // ---- celular: toque = varinha, laço com o dedo ----
+      const cel = await abrirApp(navegador, base, APARELHOS.s23);
+      const pg = cel.pagina;
+      await abrirModelo(pg, arq.conferencia);
+      await pg.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+      await pg.evaluate(() => window.__fatiador.mudarOpcaoSelecao({ modo: 'casca' }));
+      const t1 = await pontoDoTopo(pg, 0);
+      await pg.touchscreen.tap(t1.x, t1.y);
+      await pg.waitForTimeout(100);
+      s = await infoSelecao(pg);
+      confere(s.triangulos === 12, 'S23: toque rápido na peça = varinha');
+      let pequenos = await alvosPequenos(pg);
+      confere(pequenos.length === 0, 'S23: barrinha da seleção com alvos de 44 px', pequenos.join(', '));
+      await pg.locator('#barra-selecao [data-sel-combinar="somar"]').tap();
+      const t2 = await pontoDoTopo(pg, 1);
+      await pg.touchscreen.tap(t2.x, t2.y);
+      await pg.waitForTimeout(100);
+      confere((await infoSelecao(pg)).triangulos === 24, 'S23: botão ＋ na barrinha soma');
+      await pg.locator('#barra-selecao [data-sel-ajuste="limpar"]').tap();
+      await pg.locator('#barra-selecao [data-sel-ferramenta="laco"]').tap();
+      const cdp = await cel.contexto.newCDPSession(pg);
+      const c1 = await caixaNaTela(pg, 0);
+      const camA = await camera(pg);
+      const contorno = [[c1.x0 - 12, c1.y0 - 12], [c1.x1 + 12, c1.y0 - 12], [c1.x1 + 12, c1.y1 + 12], [c1.x0 - 12, c1.y1 + 12], [c1.x0 - 12, c1.y0 - 6]];
+      await toque(cdp, 'touchStart', [contorno[0]]);
+      for (let k = 1; k < contorno.length; k++) {
+        const [ax, ay] = contorno[k - 1], [bx, by] = contorno[k];
+        for (let f = 1; f <= 6; f++) await toque(cdp, 'touchMove', [[ax + (bx - ax) * f / 6, ay + (by - ay) * f / 6]]);
+      }
+      await toque(cdp, 'touchEnd', []);
+      await pg.waitForTimeout(100);
+      s = await infoSelecao(pg);
+      confere(s.triangulos >= 2 && s.triangulos <= 6 && !s.fundo && s.objetos === '0' && dist(camA.p, (await camera(pg)).p) < 1e-6, `S23: laço com o dedo pega o que aparece do cubo (${s.triangulos}) sem girar a vista`);
+      await arrastarDedos(cdp, [[c1.x0, 300], [c1.x1, 300]], [[c1.x0 - 80, 300], [c1.x1 + 80, 300]]);
+      confere((await camera(pg)).d < camA.d * 0.95, 'S23: com o laço ligado, a pinça ainda dá zoom');
+      await pg.screenshot({ path: join(RESULTADOS, 'selecao-celular.png') });
+      await pg.locator('.barra-inferior [data-abre="painel-ferramentas"]').tap();
+      await pg.waitForTimeout(350);
+      await pg.locator('#sec-selecao').scrollIntoViewIfNeeded();
+      pequenos = await alvosPequenos(pg);
+      confere(pequenos.length === 0, 'S23: painel da seleção com alvos de 44 px', pequenos.join(', '));
+      await pg.screenshot({ path: join(RESULTADOS, 'selecao-painel-celular.png') });
+      confere(cel.erros.length === 0, 'sem erros no console', cel.erros.join(' | '));
+      await cel.contexto.close();
+    }
+
     // ---------------- tablet ----------------
     console.log('\n[tablet]');
-    {
+    if (rodar('tablet')) {
       const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.tablet);
       const e = await estado(pagina);
       confere(!e.modoLeve, 'tablet forte não liga o modo leve');
@@ -504,7 +885,7 @@ async function principal() {
 
     // ---------------- Galaxy S23 Ultra ----------------
     console.log('\n[Galaxy S23 Ultra]');
-    {
+    if (rodar('Galaxy S23 Ultra')) {
       const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.s23);
       let e = await estado(pagina);
       confere(!e.modoLeve && e.nivel === 'forte' && e.limiteTela === 1500000, 'S23 Ultra: aparelho forte, modo leve desligado', JSON.stringify(e));
@@ -594,7 +975,7 @@ async function principal() {
 
     // ---------------- aparelho fraco ----------------
     console.log('\n[aparelho fraco]');
-    {
+    if (rodar('aparelho fraco')) {
       const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.fraco);
       const e = await estado(pagina);
       confere(e.nivel === 'fraco' && e.modoLeve && e.limiteTela === 150000, 'aparelho fraco: modo leve mais forte');
@@ -605,7 +986,7 @@ async function principal() {
 
     // ---------------- app instalável e offline ----------------
     console.log('\n[app instalável e offline]');
-    {
+    if (rodar('app instalável e offline')) {
       const contexto = await navegador.newContext({ viewport: { width: 1280, height: 720 } });
       await contexto.route('https://cdn.jsdelivr.net/**', rotaCdn);
       const pagina = await contexto.newPage();
@@ -637,7 +1018,7 @@ async function principal() {
       ? (await readdir(pastaModelos)).filter((n) => /\.(stl|obj|3mf)$/i.test(n))
       : [];
     console.log(`\n[modelos de referência: ${modelos.length ? modelos.join(', ') : 'nenhum em testes/modelos/'}]`);
-    if (modelos.length) {
+    if (modelos.length && rodar("modelos de referência")) {
       const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.pc4gb);
       for (const nome of modelos) {
         const ms = await abrirModelo(pagina, join(pastaModelos, nome));
@@ -647,6 +1028,51 @@ async function principal() {
         console.log(`      mesa: ${selo}`);
         if (/arco|smile/i.test(nome)) confere(/^Cab|^Cada objeto cabe/.test(selo), `${nome}: cada peça cabe na mesa da A1`, selo);
         await pagina.screenshot({ path: join(RESULTADOS, `modelo-${nome}.png`) });
+        if (/arco|smile/i.test(nome)) {
+          // seleção no modelo grande (PC de 4 GB): varinha por ângulo e casca no ponto mais alto, e laço
+          await pagina.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+          await pagina.waitForTimeout(100);
+          const alto = await pagina.evaluate(() => {
+            const m = window.__fatiador.estado.malha;
+            let melhor = -Infinity, tm = 0;
+            for (let t = 0; t < m.indices.length / 3; t++) {
+              const a = m.indices[t * 3] * 3, b = m.indices[t * 3 + 1] * 3, c = m.indices[t * 3 + 2] * 3;
+              const z = (m.posicoes[a + 2] + m.posicoes[b + 2] + m.posicoes[c + 2]) / 3;
+              const nz = (m.posicoes[b] - m.posicoes[a]) * (m.posicoes[c + 1] - m.posicoes[a + 1]) - (m.posicoes[b + 1] - m.posicoes[a + 1]) * (m.posicoes[c] - m.posicoes[a]);
+              if (nz > 0 && z > melhor) { melhor = z; tm = t; }
+            }
+            const i = m.indices, p = m.posicoes;
+            return [0, 1, 2].map((k) => (p[i[tm * 3] * 3 + k] + p[i[tm * 3 + 1] * 3 + k] + p[i[tm * 3 + 2] * 3 + k]) / 3);
+          });
+          const pt = await naTela(pagina, alto);
+          const tempos = await pagina.evaluate(([x, y]) => {
+            const f = window.__fatiador;
+            const r = {};
+            f.mudarOpcaoSelecao({ modo: 'angulo', angulo: 30, ferramenta: 'varinha' });
+            let t0 = performance.now();
+            r.acertou = f.usarVarinha({ x, y });
+            r.angulo = performance.now() - t0;
+            r.nAngulo = f.estado.sel.resumo ? f.estado.sel.resumo.triangulos : 0;
+            f.mudarOpcaoSelecao({ modo: 'casca' });
+            t0 = performance.now();
+            f.usarVarinha({ x, y });
+            r.casca = performance.now() - t0;
+            r.nCasca = f.estado.sel.resumo ? f.estado.sel.resumo.triangulos : 0;
+            const c = f.visualizador.renderer.domElement.getBoundingClientRect();
+            t0 = performance.now();
+            f.usarLaco([[c.left + c.width * 0.3, c.top + c.height * 0.3], [c.left + c.width * 0.7, c.top + c.height * 0.3], [c.left + c.width * 0.7, c.top + c.height * 0.7], [c.left + c.width * 0.3, c.top + c.height * 0.7]]);
+            r.laco = performance.now() - t0;
+            r.nLaco = f.estado.sel.resumo ? f.estado.sel.resumo.triangulos : 0;
+            r.destacados = f.visualizador.triangulosDestacados();
+            f.mudarOpcaoSelecao({ modo: 'cor' });
+            return r;
+          }, [pt.x, pt.y]);
+          const depoisSel = await estado(pagina);
+          confere(tempos.acertou && tempos.nAngulo > 0 && tempos.nCasca >= tempos.nAngulo && tempos.nLaco > 0 && tempos.destacados > 0,
+            `${nome}: seleção — ângulo ${tempos.nAngulo} tri em ${tempos.angulo.toFixed(0)} ms (com a vizinhança), casca ${tempos.nCasca} em ${tempos.casca.toFixed(0)} ms, laço ${tempos.nLaco} em ${tempos.laco.toFixed(0)} ms; ${depoisSel.totalMB.toFixed(0)} MB`);
+          await pagina.screenshot({ path: join(RESULTADOS, `selecao-${nome}.png`) });
+          await pagina.evaluate(() => window.__fatiador.ajustarSelecao('limpar'));
+        }
         if (/\.3mf$/i.test(nome)) {
           const original = await ler3mf(readFileSync(join(pastaModelos, nome)), JSZip);
           const t0 = Date.now();
@@ -666,6 +1092,27 @@ async function principal() {
           if (/smile/i.test(nome)) {
             await conferirXml(pagina, baixado.buffer, nome);
             confere(e.pintura && e.pintura.pintados === 147643 && e.pintura.estados.join() === '2', `${nome}: pintura azul dos tênis lida (${e.pintura ? e.pintura.pintados : 0} triângulos)`);
+            // histórico no modelo grande: trocar a cor e desfazer (rápido e pela receita)
+            const antes = await assinaturaPintura(pagina);
+            let t0h = Date.now();
+            await pagina.evaluate(() => window.__fatiador.trocarPintura({ de: 2, para: 1 }));
+            const msTroca = Date.now() - t0h;
+            t0h = Date.now();
+            await pagina.evaluate(() => window.__fatiador.desfazer());
+            await esperarLivre(pagina);
+            const msRapido = Date.now() - t0h;
+            const igualRapido = await assinaturaPintura(pagina) === antes;
+            await pagina.evaluate(() => window.__fatiador.refazer());
+            await esperarLivre(pagina);
+            // sem a volta guardada (como acima do limite de memória): reabre e refaz
+            await pagina.evaluate(() => { for (const p of window.__fatiador.estado.historico.passos) { p.volta = null; p.voltaBytes = 0; } });
+            t0h = Date.now();
+            await pagina.evaluate(() => window.__fatiador.desfazer());
+            await esperarLivre(pagina);
+            const msReabrir = Date.now() - t0h;
+            const depoisH = await estado(pagina);
+            confere(igualRapido && await assinaturaPintura(pagina) === antes && depoisH.pintura.estados.join() === '2',
+              `${nome}: trocar cor ${msTroca} ms; desfazer rápido ${msRapido} ms; desfazer reabrindo ${(msReabrir / 1000).toFixed(1)} s, ${depoisH.totalMB.toFixed(0)} MB; pintura volta igual`);
           }
         }
       }

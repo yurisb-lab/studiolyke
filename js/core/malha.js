@@ -155,6 +155,7 @@ export function bytesDaMalha(malha) {
   if (malha.pinturaOutros) b += malha.pinturaOutros.atributos.byteLength + malha.pinturaOutros.inicio.byteLength;
   if (malha.pinturaCor) b += malha.pinturaCor.codigos.byteLength + malha.pinturaCor.inicio.byteLength;
   if (malha.detalhe) b += malha.detalhe.posicoes.byteLength;
+  if (malha.origem) b += malha.origem.byteLength;
   if (malha.arquivo3mf) for (const e of malha.arquivo3mf.extras || []) b += e.bytes.byteLength;
   return b;
 }
@@ -224,13 +225,17 @@ export function transferiveis(...malhas) {
       juntar(m.pinturaCor.inicio);
     }
     if (m.detalhe) juntar(m.detalhe.posicoes);
+    juntar(m.origem);
     if (m.arquivo3mf) for (const e of m.arquivo3mf.extras || []) juntar(e.bytes);
   }
   return lista;
 }
 
-/** Copia só os vértices usados pelos índices (para a malha leve da tela). */
-export function compactar(posicoes, indices) {
+/**
+ * Copia só os vértices usados pelos índices (para a malha leve da tela).
+ * comOrigem: devolve também origem[v novo] = vértice da malha completa (para a seleção).
+ */
+export function compactar(posicoes, indices, { comOrigem = false } = {}) {
   const nv = posicoes.length / 3;
   const mapa = new Int32Array(nv).fill(-1);
   let usados = 0;
@@ -249,5 +254,8 @@ export function compactar(posicoes, indices) {
   }
   const novosIdx = new Uint32Array(indices.length);
   for (let i = 0; i < indices.length; i++) novosIdx[i] = mapa[indices[i]];
-  return { posicoes: novasPos, indices: novosIdx };
+  if (!comOrigem) return { posicoes: novasPos, indices: novosIdx };
+  const origem = new Uint32Array(usados);
+  for (let v = 0; v < nv; v++) if (mapa[v] !== -1) origem[mapa[v]] = v;
+  return { posicoes: novasPos, indices: novosIdx, origem };
 }

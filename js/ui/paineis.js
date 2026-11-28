@@ -73,7 +73,10 @@ export function criarMenuContexto(itens) {
   const fechar = () => {
     menu.hidden = true;
   };
+  let apertouNoMenu = false;
+  menu.addEventListener('pointerdown', () => { apertouNoMenu = true; });
   const abrir = (x, y) => {
+    apertouNoMenu = false;
     menu.innerHTML = '';
     for (const item of itens()) {
       if (item === '-') {
@@ -84,7 +87,10 @@ export function criarMenuContexto(itens) {
       b.type = 'button';
       b.setAttribute('role', 'menuitem');
       b.textContent = item.texto;
-      b.addEventListener('click', () => {
+      b.addEventListener('click', (e) => {
+        // O dedo que segurou para abrir o menu, ao sair da tela, gera um "clique" no item
+        // que ficou embaixo dele: só vale o clique que começou dentro do menu (ou o teclado).
+        if (e.detail !== 0 && !apertouNoMenu) return;
         fechar();
         item.acao();
       });

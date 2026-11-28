@@ -32,6 +32,12 @@
       <symbol id="i-cubo" viewBox="0 0 24 24"><path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z M4.5 7.7L12 12l7.5-4.3M12 12v8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
       <symbol id="i-cima" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2" fill="currentColor"/></symbol>
       <symbol id="i-frente" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 19h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+      <symbol id="i-desfazer" viewBox="0 0 24 24"><path d="M9 7L4.5 11.5 9 16M5 11.5h9.5a5 5 0 0 1 0 10H12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-refazer" viewBox="0 0 24 24"><path d="M15 7l4.5 4.5L15 16M19 11.5H9.5a5 5 0 0 0 0 10H12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-salvar" viewBox="0 0 24 24"><path d="M5 4.5h11l3 3V19a.5.5 0 0 1-.5.5h-13A.5.5 0 0 1 5 19z M8 4.5v4.5h7V4.5 M8 19.5v-6h8v6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-projetos" viewBox="0 0 24 24"><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h4l2 2h7A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z M8 12h8M8 15h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+      <symbol id="i-editar" viewBox="0 0 24 24"><path d="M5 19l1-4L15.5 5.5a2 2 0 0 1 3 3L9 18z M13.5 7.5l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-lixo" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10.5 10.5v5.5M13.5 10.5v5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-lado" viewBox="0 0 24 24"><path d="M7 19V9l5-4 5 4v10z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 19h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     </defs>
   </svg>
@@ -46,9 +52,13 @@
           <svg viewBox="0 0 32 32"><path d="M16 3l11 6.3v13.4L16 29 5 22.7V9.3z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M5 17.5l22-6" stroke="var(--destaque)" stroke-width="2.4" stroke-linecap="round"/></svg>
         </span>
         <span class="nome-app"><strong>Fatiador</strong> <span class="sub">L.Y.K.E 3D</span></span>
-        <span class="versao" data-versao id="versao">v0.0.3</span>
+        <span class="versao" data-versao id="versao">v0.0.5</span>
       </div>
       <div class="topo-direita">
+        <div class="grupo-historico fora-celular" role="group" aria-label="Histórico">
+          <button type="button" class="botao-icone" data-acao="desfazer" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled><svg aria-hidden="true"><use href="#i-desfazer"/></svg></button>
+          <button type="button" class="botao-icone" data-acao="refazer" title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled><svg aria-hidden="true"><use href="#i-refazer"/></svg></button>
+        </div>
         <button type="button" id="chip-modo-leve" class="chip" aria-pressed="false">Modo leve</button>
         <button type="button" id="medidor" class="medidor" data-nivel="ok">
           <span class="barra" aria-hidden="true"><span></span></span>
@@ -70,7 +80,24 @@
         <button type="button" class="ferramenta" data-acao="exportar" title="Exportar 3MF para o Bambu Studio (Ctrl+E)" disabled>
           <svg aria-hidden="true"><use href="#i-exportar"/></svg><span>Exportar 3MF</span>
         </button>
-        <p class="dica">STL, OBJ ou 3MF. No computador, dá para arrastar o arquivo para a tela. O 3MF exportado abre no Bambu Studio com as placas, os filamentos e a pintura.</p>
+        <p class="dica">STL, OBJ, 3MF ou projeto .lyke. No computador, dá para arrastar o arquivo para a tela. O 3MF exportado abre no Bambu Studio com as placas, os filamentos e a pintura.</p>
+      </section>
+      <section id="sec-selecao">
+        <h2>Seleção</h2>
+        <div id="conteudo-selecao"></div>
+      </section>
+      <section>
+        <h2>Projeto</h2>
+        <button type="button" class="ferramenta" data-acao="salvar-projeto" title="Salvar projeto neste navegador (Ctrl+S)" disabled>
+          <svg aria-hidden="true"><use href="#i-salvar"/></svg><span>Salvar projeto</span>
+        </button>
+        <button type="button" class="ferramenta" data-acao="projetos" title="Projetos salvos neste navegador">
+          <svg aria-hidden="true"><use href="#i-projetos"/></svg><span>Projetos salvos</span>
+        </button>
+        <button type="button" class="ferramenta" data-acao="baixar-projeto" title="Baixar o projeto (.lyke) para levar a outro aparelho" disabled>
+          <svg aria-hidden="true"><use href="#i-exportar"/></svg><span>Baixar projeto (.lyke)</span>
+        </button>
+        <p class="dica">O trabalho é guardado sozinho a cada mudança. O projeto guarda o modelo original e os passos do histórico, não cópias do modelo.</p>
       </section>
       <section>
         <h2>Vista</h2>
@@ -110,11 +137,17 @@
         <div class="progresso-trilho"><div id="progresso-barra"></div></div>
       </div>
       <div class="soltar" aria-hidden="true"><p>Solte o arquivo aqui</p></div>
+      <div id="barra-selecao" class="barra-selecao" role="toolbar" aria-label="Seleção" hidden></div>
+      <svg id="laco" class="laco" aria-hidden="true" hidden><polygon points=""/></svg>
       <p id="erro-inicio" class="erro-inicio" hidden></p>
     </main>
 
     <aside id="painel-propriedades" class="painel painel-dir" aria-label="Propriedades">
       <div class="alca" aria-hidden="true"><span></span></div>
+      <section id="sec-historico">
+        <h2>Histórico</h2>
+        <div id="conteudo-historico"></div>
+      </section>
       <section id="sec-modelo">
         <h2>Modelo</h2>
         <div id="conteudo-modelo"></div>
@@ -127,15 +160,16 @@
         <h2>Memória</h2>
         <div id="conteudo-memoria"></div>
       </section>
-      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.3</span></p>
+      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.5</span></p>
     </aside>
 
     <nav class="barra-inferior" aria-label="Barra de ferramentas">
       <button type="button" data-acao="abrir"><svg aria-hidden="true"><use href="#i-abrir"/></svg><span>Abrir</span></button>
-      <button type="button" data-acao="exportar" disabled><svg aria-hidden="true"><use href="#i-exportar"/></svg><span>Exportar</span></button>
-      <button type="button" data-acao="enquadrar"><svg aria-hidden="true"><use href="#i-enquadrar"/></svg><span>Enquadrar</span></button>
-      <button type="button" data-abre="painel-ferramentas" aria-controls="painel-ferramentas" aria-expanded="false"><svg aria-hidden="true"><use href="#i-cubo"/></svg><span>Vistas</span></button>
+      <button type="button" data-acao="desfazer" disabled><svg aria-hidden="true"><use href="#i-desfazer"/></svg><span>Desfazer</span></button>
+      <button type="button" data-acao="refazer" disabled><svg aria-hidden="true"><use href="#i-refazer"/></svg><span>Refazer</span></button>
+      <button type="button" data-abre="painel-ferramentas" aria-controls="painel-ferramentas" aria-expanded="false"><svg aria-hidden="true"><use href="#i-ferramentas"/></svg><span>Ferram.</span></button>
       <button type="button" data-abre="painel-propriedades" aria-controls="painel-propriedades" aria-expanded="false"><svg aria-hidden="true"><use href="#i-info"/></svg><span>Info</span></button>
+      <button type="button" data-acao="exportar" disabled><svg aria-hidden="true"><use href="#i-exportar"/></svg><span>Exportar</span></button>
     </nav>
 
     <div id="fundo-gaveta" class="fundo-gaveta"></div>
@@ -157,11 +191,32 @@
   </dialog>
 
   <dialog id="dialogo-confirmar" class="dialogo">
-    <h2>Confirmar</h2>
+    <h2 id="confirmar-titulo">Confirmar</h2>
     <p id="confirmar-texto"></p>
     <div class="dialogo-botoes">
       <button type="button" id="confirmar-sim" class="botao principal">Sim</button>
       <button type="button" id="confirmar-nao" class="botao discreto">Cancelar</button>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-nome" class="dialogo">
+    <form method="dialog" id="form-nome">
+      <h2 id="nome-titulo">Salvar projeto</h2>
+      <label class="campo-texto"><span class="rotulo" id="nome-rotulo">Nome do projeto</span>
+        <input type="text" id="nome-valor" maxlength="80" autocomplete="off" required></label>
+      <div class="dialogo-botoes">
+        <button type="submit" id="nome-ok" class="botao principal" value="ok">Salvar</button>
+        <button type="button" id="nome-cancelar" class="botao discreto">Cancelar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialogo-projetos" class="dialogo dialogo-largo">
+    <h2>Projetos salvos neste navegador</h2>
+    <div id="lista-projetos"></div>
+    <p class="nota">Para levar um projeto ao celular ou ao PC: "Baixar .lyke" aqui e abra o arquivo lá com "Abrir modelo".</p>
+    <div class="dialogo-botoes">
+      <button type="button" id="projetos-fechar" class="botao">Fechar</button>
     </div>
   </dialog>
 

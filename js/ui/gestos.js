@@ -2,7 +2,7 @@
 // Girar, zoom e arrastar ficam com os controles do three.js:
 //   um dedo gira, pinça dá zoom, dois dedos arrastam.
 // Aqui ficam os gestos do app:
-//   toque rápido -> aoToque  (vai ser a varinha na etapa 1.5)
+//   toque rápido -> aoToque  (a varinha mágica)
 //   segurar      -> aoSegurar (abre o menu)
 
 const TEMPO_TOQUE = 300; // ms
@@ -49,7 +49,7 @@ export function ligarGestos(elemento, { aoToque, aoSegurar } = {}) {
     cancelarSegurar();
     if (e.type === 'pointerup' && eraUnico && inicio && !inicio.segurou) {
       if (performance.now() - inicio.t <= TEMPO_TOQUE && aoToque) {
-        aoToque({ x: e.clientX, y: e.clientY, tipo: e.pointerType });
+        aoToque({ x: e.clientX, y: e.clientY, tipo: e.pointerType, shift: e.shiftKey, alt: e.altKey });
       }
     }
     if (ativos.size === 0) inicio = null;

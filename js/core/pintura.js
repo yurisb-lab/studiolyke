@@ -91,9 +91,13 @@ export function atualizarResumo(malha) {
  * toda a pintura do trecho. Triângulos sem a cor "de" ficam exatamente como estavam.
  * Devolve quantos triângulos mudaram.
  */
-export function trocarCorDaPintura(malha, { de, para, parteIndice = null }) {
+export function trocarCorDaPintura(malha, { de, para, parteIndice = null }, coletor = null) {
   const cor = malha.pinturaCor;
   if (!cor) return 0;
+  // coletor: guarda os códigos antigos SÓ dos triângulos que mudaram (para o desfazer rápido)
+  const voltaTri = coletor ? new ArrayCrescente(Uint32Array, 1024) : null;
+  const voltaIni = coletor ? new ArrayCrescente(Uint32Array, 1024) : null;
+  const voltaCod = coletor ? new ArrayCrescente(Uint8Array, 4096) : null;
   const apagar = de === 'todas';
   if (!apagar && !(de >= 1 && de <= ESTADO_MAXIMO)) throw new Error(`Cor ${de} não existe na pintura.`);
   if (!apagar && !(para >= 0 && para <= ESTADO_MAXIMO)) throw new Error(`A pintura do Bambu só guarda os filamentos 1 a ${ESTADO_MAXIMO}.`);
@@ -126,6 +130,13 @@ export function trocarCorDaPintura(malha, { de, para, parteIndice = null }) {
     }
     if (r) {
       mudaram++;
+      if (coletor) {
+        voltaTri.push1(t);
+        voltaIni.push1(voltaCod.tamanho);
+        voltaCod.garantir(voltaCod.tamanho + (i1 - i0));
+        voltaCod.dados.set(cor.codigos.subarray(i0, i1), voltaCod.tamanho);
+        voltaCod.tamanho += i1 - i0;
+      }
       novos.garantir(novos.tamanho + r.length);
       novos.dados.set(r, novos.tamanho);
       novos.tamanho += r.length;
@@ -136,6 +147,15 @@ export function trocarCorDaPintura(malha, { de, para, parteIndice = null }) {
     }
   }
   inicio[nTri] = novos.tamanho;
+  if (coletor) {
+    voltaIni.push1(voltaCod.tamanho);
+    coletor.volta = {
+      triangulos: voltaTri.final(),
+      inicio: voltaIni.final(),
+      codigos: voltaCod.final(),
+      apagadaAntes: !!malha.pinturaApagada,
+    };
+  }
   if (novos.tamanho === 0) {
     malha.pinturaCor = null; // não sobrou pintura nenhuma
     malha.pinturaApagada = true;
@@ -145,6 +165,50 @@ export function trocarCorDaPintura(malha, { de, para, parteIndice = null }) {
   }
   if (mudaram) malha.trianguloPintados = contarPintados(malha);
   return mudaram;
+}
+
+/**
+ * Desfaz uma troca de cor com o que o coletor guardou: os triângulos que mudaram
+ * voltam aos códigos antigos, letra por letra. Os outros ficam como estão.
+ */
+export function restaurarPintura(malha, volta) {
+  const nTri = malha.indices.length / 3;
+  const atual = malha.pinturaCor;
+  const { triangulos, inicio: vIni, codigos: vCod } = volta;
+  const tamAtual = atual ? atual.codigos.length : 0;
+  const novos = new ArrayCrescente(Uint8Array, tamAtual + vCod.length + 16);
+  const inicio = new Uint32Array(nTri + 1);
+  let j = 0;
+  for (let t = 0; t < nTri; t++) {
+    inicio[t] = novos.tamanho;
+    let ini, fim, fonte;
+    if (j < triangulos.length && triangulos[j] === t) {
+      ini = vIni[j]; fim = vIni[j + 1]; fonte = vCod; j++;
+    } else if (atual) {
+      ini = atual.inicio[t]; fim = atual.inicio[t + 1]; fonte = atual.codigos;
+    } else continue;
+    if (fim === ini) continue;
+    novos.garantir(novos.tamanho + (fim - ini));
+    novos.dados.set(fonte.subarray(ini, fim), novos.tamanho);
+    novos.tamanho += fim - ini;
+  }
+  inicio[nTri] = novos.tamanho;
+  if (novos.tamanho === 0) {
+    malha.pinturaCor = null;
+  } else {
+    malha.pinturaCor = { codigos: novos.final(), inicio, resumo: null };
+    atualizarResumo(malha);
+  }
+  malha.pinturaApagada = !!volta.apagadaAntes;
+  malha.trianguloPintados = contarPintados(malha);
+}
+
+/** Bytes que uma volta da pintura ocupa (para o limite de memória do histórico). */
+export function bytesDaVolta(volta) {
+  if (!volta) return 0;
+  let b = 64;
+  for (const v of Object.values(volta)) if (v && v.byteLength) b += v.byteLength;
+  return b;
 }
 
 function contarPintados(malha) {
@@ -264,7 +328,7 @@ export function prepararTela(Meshopt, malha, limite) {
       q += resultados[k].length;
     });
     const limpos = semTriangulosFinos(malha.posicoes, juntos, faixas);
-    tela = { ...compactar(malha.posicoes, limpos), faixas };
+    tela = { ...compactar(malha.posicoes, limpos, { comOrigem: true }), faixas };
   }
 
   // 4) pedaços reais da pintura fina
