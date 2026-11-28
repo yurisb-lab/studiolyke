@@ -1,7 +1,7 @@
 // Configurações gerais do Fatiador L.Y.K.E 3D.
 // Nenhum segredo fica aqui (nem em lugar nenhum do código).
 
-export const VERSAO = 'v0.0.4';
+export const VERSAO = 'v0.0.5';
 
 // Bibliotecas pelo CDN, sempre com versão fixa.
 // O importmap do index.html usa os mesmos endereços; os Web Workers não enxergam

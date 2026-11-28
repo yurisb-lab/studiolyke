@@ -285,6 +285,97 @@ async function esperarLivre(pagina) {
   await pagina.waitForTimeout(50);
 }
 
+/** Ponto da tela (clientX, clientY) de um ponto do modelo (mm). */
+const naTela = (pagina, ponto) => pagina.evaluate((p) => {
+  const v = window.__fatiador.visualizador;
+  const V = v.camera.position.constructor;
+  const q = new V(p[0], p[1], p[2]).add(v.grupoModelo.position).project(v.camera);
+  const r = v.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (q.x + 1) / 2 * r.width, y: r.top + (1 - q.y) / 2 * r.height };
+}, ponto);
+
+/** Centro do topo de um objeto (o ponto mais alto do meio dele). */
+async function pontoDoTopo(pagina, objeto) {
+  const p = await pagina.evaluate((io) => {
+    const m = window.__fatiador.estado.malha;
+    const o = m.objetos[io];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let t = o.primeiroTriangulo; t < o.primeiroTriangulo + o.numTriangulos; t++) {
+      for (let k = 0; k < 3; k++) {
+        const v = m.indices[t * 3 + k] * 3;
+        x0 = Math.min(x0, m.posicoes[v]); x1 = Math.max(x1, m.posicoes[v]);
+        y0 = Math.min(y0, m.posicoes[v + 1]); y1 = Math.max(y1, m.posicoes[v + 1]);
+        z1 = Math.max(z1, m.posicoes[v + 2]);
+      }
+    }
+    return [(x0 + x1) / 2 + (x1 - x0) * 0.3, (y0 + y1) / 2 + (y1 - y0) * 0.3, z1];
+  }, objeto);
+  return naTela(pagina, p);
+}
+
+/** Caixa (na tela) do topo de um objeto. */
+async function caixaNaTela(pagina, objeto) {
+  const cantos = await pagina.evaluate((io) => {
+    const m = window.__fatiador.estado.malha;
+    const o = m.objetos[io];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let t = o.primeiroTriangulo; t < o.primeiroTriangulo + o.numTriangulos; t++) {
+      for (let k = 0; k < 3; k++) {
+        const v = m.indices[t * 3 + k] * 3;
+        x0 = Math.min(x0, m.posicoes[v]); x1 = Math.max(x1, m.posicoes[v]);
+        y0 = Math.min(y0, m.posicoes[v + 1]); y1 = Math.max(y1, m.posicoes[v + 1]);
+        z1 = Math.max(z1, m.posicoes[v + 2]);
+      }
+    }
+    return [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+  }, objeto);
+  const pts = [];
+  for (const c of cantos) pts.push(await naTela(pagina, c));
+  return { x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), y1: Math.max(...pts.map((p) => p.y)) };
+}
+
+/** Um ponto da pintura de cor "estado" (pintura fina) no topo de um objeto. */
+async function pontoDaCor(pagina, objeto, estadoCor) {
+  const p = await pagina.evaluate(async ([io, e]) => {
+    const { pedacos } = await import('./js/io/pintura-bambu.js');
+    const { corSimples } = await import('./js/core/pintura.js');
+    const m = window.__fatiador.estado.malha;
+    const o = m.objetos[io];
+    const cor = m.pinturaCor;
+    let melhor = null;
+    for (let t = o.primeiroTriangulo; t < o.primeiroTriangulo + o.numTriangulos; t++) {
+      if (corSimples(cor, t) !== -1) continue;
+      const v = (k) => { const q = m.indices[t * 3 + k] * 3; return [m.posicoes[q], m.posicoes[q + 1], m.posicoes[q + 2]]; };
+      pedacos(cor.codigos, cor.inicio[t], cor.inicio[t + 1], v(0), v(1), v(2), (es, x0, y0, z0, x1, y1, z1, x2, y2, z2) => {
+        const a = Math.abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0));
+        const z = (z0 + z1 + z2) / 3;
+        if (es === e && (!melhor || z > melhor.z + 1e-6 || (Math.abs(z - melhor.z) < 1e-6 && a > melhor.a))) melhor = { p: [(x0 + x1 + x2) / 3, (y0 + y1 + y2) / 3, z], z, a };
+      });
+    }
+    return melhor && melhor.p;
+  }, [objeto, estadoCor]);
+  return naTela(pagina, p);
+}
+
+const infoSelecao = (pagina) => pagina.evaluate(() => {
+  const f = window.__fatiador;
+  const r = f.estado.sel.resumo;
+  const m = f.estado.malha, sel = f.estado.sel.mascara;
+  let fundo = false;
+  const objetos = new Set();
+  if (sel) {
+    for (let t = 0; t < sel.length; t++) {
+      if (!sel[t]) continue;
+      const i = m.indices, p = m.posicoes;
+      const a = i[t * 3] * 3, b = i[t * 3 + 1] * 3, c = i[t * 3 + 2] * 3;
+      const nz = (p[b] - p[a]) * (p[c + 1] - p[a + 1]) - (p[b + 1] - p[a + 1]) * (p[c] - p[a]);
+      if (nz < -1e-9 && Math.max(p[a + 2], p[b + 2], p[c + 2]) - Math.min(p[a + 2], p[b + 2], p[c + 2]) < 1e-6) fundo = true;
+      objetos.add(m.objetos.findIndex((o) => t >= o.primeiroTriangulo && t < o.primeiroTriangulo + o.numTriangulos));
+    }
+  }
+  return { triangulos: r ? r.triangulos : 0, pedacos: r ? r.pedacos : 0, destacados: f.visualizador.triangulosDestacados(), fundo, objetos: [...objetos].join() };
+});
+
 const coresNaTela = (pagina) => pagina.evaluate(() => window.__fatiador.visualizador.coresNaTela().map((c) => c.cor));
 
 // ---------- toque (Chrome DevTools Protocol) ----------
@@ -615,6 +706,160 @@ async function principal() {
       await cel.contexto.close();
     }
 
+    // ---------------- seleção (etapa 1.5) ----------------
+    console.log('\n[seleção]');
+    if (rodar('seleção')) {
+      const { contexto, pagina, erros } = await abrirApp(navegador, base, APARELHOS.pc4gb);
+      await abrirModelo(pagina, arq.conferencia);
+      await pagina.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+      await pagina.waitForTimeout(100);
+      const topo1 = await pontoDoTopo(pagina, 0);
+      const topo2 = await pontoDoTopo(pagina, 1);
+      const camAntes = await camera(pagina);
+      // casca
+      await pagina.click('[data-sel-modo="casca"]');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      let s = await infoSelecao(pagina);
+      confere(s.triangulos === 12 && s.destacados > 0, `varinha (casca): clique no cubo pega o cubo inteiro (${s.triangulos} triângulos, ${s.destacados} destacados)`);
+      confere(await pagina.isVisible('#barra-selecao') && (await pagina.textContent('#barra-selecao')).includes('12'), 'barrinha da seleção mostra quanto está selecionado');
+      // Shift soma o outro cubo
+      await pagina.keyboard.down('Shift');
+      await pagina.mouse.click(topo2.x, topo2.y);
+      await pagina.keyboard.up('Shift');
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 24, 'Shift + clique soma o outro cubo');
+      await pagina.keyboard.press('Control+z');
+      await esperarLivre(pagina);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 12, 'Ctrl+Z desfaz a seleção');
+      await pagina.keyboard.press('Control+y');
+      await esperarLivre(pagina);
+      confere((await infoSelecao(pagina)).triangulos === 24, 'Ctrl+Y refaz a seleção');
+      await pagina.keyboard.press('Control+d');
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 0 && s.destacados === 0, 'Ctrl+D limpa (e o destaque some)');
+      // ângulo, só visível: de cima, só o topo
+      await pagina.click('[data-sel-modo="angulo"]');
+      await pagina.fill('#sel-angulo', '95');
+      await pagina.dispatchEvent('#sel-angulo', 'change');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos >= 2 && s.triangulos <= 6 && !s.fundo, `ângulo 95° com "só faces visíveis": de cima pega o topo e o que aparece dos lados, nunca o fundo (${s.triangulos})`);
+      await pagina.uncheck('#sel-visivel');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 12, `sem "só faces visíveis" passa para os lados e o fundo (${s.triangulos})`);
+      await pagina.check('#sel-visivel');
+      // cor: o F pintado no topo (pintura fina): guarda só os pedaços da cor
+      await pagina.click('[data-sel-modo="cor"]');
+      const pontoF = await pontoDaCor(pagina, 0, 2);
+      await pagina.mouse.click(pontoF.x, pontoF.y);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos > 0 && s.pedacos > 0 && /borda da pintura/.test(await pagina.textContent('#info-selecao')), `varinha (cor) no F azul: ${s.triangulos} triângulos, ${s.pedacos} com só os pedaços azuis`);
+      await pagina.screenshot({ path: join(RESULTADOS, 'selecao-cor.png') });
+      // crescer, encolher, inverter
+      await pagina.click('[data-sel-modo="casca"]');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      await pagina.keyboard.press('Control+i');
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === 12, 'Ctrl+I inverte (o outro cubo)');
+      await pagina.click('[data-sel-modo="angulo"]');
+      await pagina.fill('#sel-angulo', '30');
+      await pagina.dispatchEvent('#sel-angulo', 'change');
+      await pagina.mouse.click(topo1.x, topo1.y);
+      const soTopo = (await infoSelecao(pagina)).triangulos;
+      await pagina.click('[data-sel-ajuste="crescer"]');
+      const crescido = (await infoSelecao(pagina)).triangulos;
+      await pagina.click('[data-sel-ajuste="encolher"]');
+      s = await infoSelecao(pagina);
+      confere(soTopo === 2 && crescido > soTopo && s.triangulos < crescido, `crescer pega os vizinhos (${soTopo} → ${crescido}) e encolher tira a borda (${s.triangulos})`);
+      await pagina.click('[data-sel-modo="casca"]');
+      // seleção salva
+      await pagina.mouse.click(topo1.x, topo1.y);
+      await pagina.fill('#sel-nome', 'cubo F');
+      await pagina.press('#sel-nome', 'Enter');
+      confere(await pagina.locator('#lista-salvas li').count() === 1, 'salvar a seleção com nome');
+      await pagina.keyboard.press('Control+d');
+      await pagina.click('[data-usar-salva="0"]');
+      confere((await infoSelecao(pagina)).triangulos === 12, '"Usar" traz a seleção salva de volta');
+      // laço com o mouse (não gira a vista)
+      await pagina.keyboard.press('Control+d');
+      await pagina.keyboard.press('l');
+      const caixa1 = await caixaNaTela(pagina, 0);
+      await pagina.mouse.move(caixa1.x0 - 15, caixa1.y0 - 15);
+      await pagina.mouse.down();
+      for (const [x, y] of [[caixa1.x1 + 15, caixa1.y0 - 15], [caixa1.x1 + 15, caixa1.y1 + 15], [caixa1.x0 - 15, caixa1.y1 + 15], [caixa1.x0 - 15, caixa1.y0 - 10]]) {
+        await pagina.mouse.move(x, y, { steps: 8 });
+      }
+      await pagina.mouse.up();
+      s = await infoSelecao(pagina);
+      const camDepois = await camera(pagina);
+      const doLaco = s.triangulos;
+      confere(s.triangulos >= 2 && s.triangulos <= 6 && !s.fundo && s.objetos === '0' && dist(camAntes.p, camDepois.p) < 1e-6, `laço em volta do cubo, de cima: pega só o que aparece dele (${s.triangulos}) e não gira a vista`);
+      await pagina.screenshot({ path: join(RESULTADOS, 'selecao-laco.png') });
+      await pagina.keyboard.press('w');
+      // vai junto com o projeto
+      await pagina.keyboard.press('Control+s');
+      await pagina.waitForSelector('#dialogo-nome[open]');
+      await pagina.press('#nome-valor', 'Enter');
+      await pagina.waitForFunction(() => window.__fatiador.estado.projeto.id, null, { timeout: 10000 });
+      await pagina.evaluate(() => window.__fatiador.salvarAgora());
+      await pagina.reload();
+      await pagina.waitForSelector('#dialogo-confirmar[open]', { timeout: 30000 });
+      await pagina.click('#confirmar-sim');
+      await esperarCarregar(pagina);
+      await pagina.waitForTimeout(200);
+      s = await infoSelecao(pagina);
+      confere(s.triangulos === doLaco && s.destacados > 0 && await pagina.locator('#lista-salvas li').count() === 1, 'a seleção atual e as salvas voltam com o projeto');
+      confere(erros.length === 0, 'sem erros no console', erros.join(' | '));
+      await contexto.close();
+
+      // ---- celular: toque = varinha, laço com o dedo ----
+      const cel = await abrirApp(navegador, base, APARELHOS.s23);
+      const pg = cel.pagina;
+      await abrirModelo(pg, arq.conferencia);
+      await pg.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+      await pg.evaluate(() => window.__fatiador.mudarOpcaoSelecao({ modo: 'casca' }));
+      const t1 = await pontoDoTopo(pg, 0);
+      await pg.touchscreen.tap(t1.x, t1.y);
+      await pg.waitForTimeout(100);
+      s = await infoSelecao(pg);
+      confere(s.triangulos === 12, 'S23: toque rápido na peça = varinha');
+      let pequenos = await alvosPequenos(pg);
+      confere(pequenos.length === 0, 'S23: barrinha da seleção com alvos de 44 px', pequenos.join(', '));
+      await pg.locator('#barra-selecao [data-sel-combinar="somar"]').tap();
+      const t2 = await pontoDoTopo(pg, 1);
+      await pg.touchscreen.tap(t2.x, t2.y);
+      await pg.waitForTimeout(100);
+      confere((await infoSelecao(pg)).triangulos === 24, 'S23: botão ＋ na barrinha soma');
+      await pg.locator('#barra-selecao [data-sel-ajuste="limpar"]').tap();
+      await pg.locator('#barra-selecao [data-sel-ferramenta="laco"]').tap();
+      const cdp = await cel.contexto.newCDPSession(pg);
+      const c1 = await caixaNaTela(pg, 0);
+      const camA = await camera(pg);
+      const contorno = [[c1.x0 - 12, c1.y0 - 12], [c1.x1 + 12, c1.y0 - 12], [c1.x1 + 12, c1.y1 + 12], [c1.x0 - 12, c1.y1 + 12], [c1.x0 - 12, c1.y0 - 6]];
+      await toque(cdp, 'touchStart', [contorno[0]]);
+      for (let k = 1; k < contorno.length; k++) {
+        const [ax, ay] = contorno[k - 1], [bx, by] = contorno[k];
+        for (let f = 1; f <= 6; f++) await toque(cdp, 'touchMove', [[ax + (bx - ax) * f / 6, ay + (by - ay) * f / 6]]);
+      }
+      await toque(cdp, 'touchEnd', []);
+      await pg.waitForTimeout(100);
+      s = await infoSelecao(pg);
+      confere(s.triangulos >= 2 && s.triangulos <= 6 && !s.fundo && s.objetos === '0' && dist(camA.p, (await camera(pg)).p) < 1e-6, `S23: laço com o dedo pega o que aparece do cubo (${s.triangulos}) sem girar a vista`);
+      await arrastarDedos(cdp, [[c1.x0, 300], [c1.x1, 300]], [[c1.x0 - 80, 300], [c1.x1 + 80, 300]]);
+      confere((await camera(pg)).d < camA.d * 0.95, 'S23: com o laço ligado, a pinça ainda dá zoom');
+      await pg.screenshot({ path: join(RESULTADOS, 'selecao-celular.png') });
+      await pg.locator('.barra-inferior [data-abre="painel-ferramentas"]').tap();
+      await pg.waitForTimeout(350);
+      await pg.locator('#sec-selecao').scrollIntoViewIfNeeded();
+      pequenos = await alvosPequenos(pg);
+      confere(pequenos.length === 0, 'S23: painel da seleção com alvos de 44 px', pequenos.join(', '));
+      await pg.screenshot({ path: join(RESULTADOS, 'selecao-painel-celular.png') });
+      confere(cel.erros.length === 0, 'sem erros no console', cel.erros.join(' | '));
+      await cel.contexto.close();
+    }
+
     // ---------------- tablet ----------------
     console.log('\n[tablet]');
     if (rodar('tablet')) {
@@ -783,6 +1028,51 @@ async function principal() {
         console.log(`      mesa: ${selo}`);
         if (/arco|smile/i.test(nome)) confere(/^Cab|^Cada objeto cabe/.test(selo), `${nome}: cada peça cabe na mesa da A1`, selo);
         await pagina.screenshot({ path: join(RESULTADOS, `modelo-${nome}.png`) });
+        if (/arco|smile/i.test(nome)) {
+          // seleção no modelo grande (PC de 4 GB): varinha por ângulo e casca no ponto mais alto, e laço
+          await pagina.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+          await pagina.waitForTimeout(100);
+          const alto = await pagina.evaluate(() => {
+            const m = window.__fatiador.estado.malha;
+            let melhor = -Infinity, tm = 0;
+            for (let t = 0; t < m.indices.length / 3; t++) {
+              const a = m.indices[t * 3] * 3, b = m.indices[t * 3 + 1] * 3, c = m.indices[t * 3 + 2] * 3;
+              const z = (m.posicoes[a + 2] + m.posicoes[b + 2] + m.posicoes[c + 2]) / 3;
+              const nz = (m.posicoes[b] - m.posicoes[a]) * (m.posicoes[c + 1] - m.posicoes[a + 1]) - (m.posicoes[b + 1] - m.posicoes[a + 1]) * (m.posicoes[c] - m.posicoes[a]);
+              if (nz > 0 && z > melhor) { melhor = z; tm = t; }
+            }
+            const i = m.indices, p = m.posicoes;
+            return [0, 1, 2].map((k) => (p[i[tm * 3] * 3 + k] + p[i[tm * 3 + 1] * 3 + k] + p[i[tm * 3 + 2] * 3 + k]) / 3);
+          });
+          const pt = await naTela(pagina, alto);
+          const tempos = await pagina.evaluate(([x, y]) => {
+            const f = window.__fatiador;
+            const r = {};
+            f.mudarOpcaoSelecao({ modo: 'angulo', angulo: 30, ferramenta: 'varinha' });
+            let t0 = performance.now();
+            r.acertou = f.usarVarinha({ x, y });
+            r.angulo = performance.now() - t0;
+            r.nAngulo = f.estado.sel.resumo ? f.estado.sel.resumo.triangulos : 0;
+            f.mudarOpcaoSelecao({ modo: 'casca' });
+            t0 = performance.now();
+            f.usarVarinha({ x, y });
+            r.casca = performance.now() - t0;
+            r.nCasca = f.estado.sel.resumo ? f.estado.sel.resumo.triangulos : 0;
+            const c = f.visualizador.renderer.domElement.getBoundingClientRect();
+            t0 = performance.now();
+            f.usarLaco([[c.left + c.width * 0.3, c.top + c.height * 0.3], [c.left + c.width * 0.7, c.top + c.height * 0.3], [c.left + c.width * 0.7, c.top + c.height * 0.7], [c.left + c.width * 0.3, c.top + c.height * 0.7]]);
+            r.laco = performance.now() - t0;
+            r.nLaco = f.estado.sel.resumo ? f.estado.sel.resumo.triangulos : 0;
+            r.destacados = f.visualizador.triangulosDestacados();
+            f.mudarOpcaoSelecao({ modo: 'cor' });
+            return r;
+          }, [pt.x, pt.y]);
+          const depoisSel = await estado(pagina);
+          confere(tempos.acertou && tempos.nAngulo > 0 && tempos.nCasca >= tempos.nAngulo && tempos.nLaco > 0 && tempos.destacados > 0,
+            `${nome}: seleção — ângulo ${tempos.nAngulo} tri em ${tempos.angulo.toFixed(0)} ms (com a vizinhança), casca ${tempos.nCasca} em ${tempos.casca.toFixed(0)} ms, laço ${tempos.nLaco} em ${tempos.laco.toFixed(0)} ms; ${depoisSel.totalMB.toFixed(0)} MB`);
+          await pagina.screenshot({ path: join(RESULTADOS, `selecao-${nome}.png`) });
+          await pagina.evaluate(() => window.__fatiador.ajustarSelecao('limpar'));
+        }
         if (/\.3mf$/i.test(nome)) {
           const original = await ler3mf(readFileSync(join(pastaModelos, nome)), JSZip);
           const t0 = Date.now();

@@ -1,5 +1,24 @@
 # Mudanças
 
+## v0.0.5 — Etapa 1.5: seleção (28/11/2026)
+
+- **Seção "Seleção"** no painel de ferramentas (no celular, em "Ferram.") e uma **barrinha sobre a peça** com a ferramenta, quanto está selecionado, ＋ (somar), − (tirar) e ✕ (limpar).
+- **Varinha mágica**: clique na peça (no celular, **toque rápido**). Três jeitos:
+  - **Cor**: a região do mesmo filamento, seja pintura ou a cor da parte. "Só a região tocada" (ligado) pega só a mancha ligada ao toque; desligado, pega aquela cor no modelo todo.
+  - **Ângulo**: cresce pela superfície até achar uma quina mais forte que o limite (5° a 180°, padrão 30°).
+  - **Casca**: a peça solta inteira.
+- **Contorno exato da pintura fina**: nos triângulos da borda do desenho do Bambu, a seleção guarda só os pedaços da cor tocada, e o destaque mostra só eles. É a base do "sorriso com contorno exato" da etapa 1.7.
+- **Laço** (tecla L): desenhe um contorno com o mouse, o dedo ou a S Pen. Com o laço ligado, um dedo (ou o botão esquerdo) desenha; dois dedos, a pinça e o botão direito continuam mexendo na vista.
+- **Só faces visíveis** (ligado por padrão): a varinha e o laço só pegam o que aparece na tela, nunca o lado de trás ou de baixo, que era o defeito do split3mf. Tudo cresce pela superfície, sem atravessar o modelo.
+- **Somar e tirar**: Shift + clique soma, Alt + clique tira; ou os botões Nova / ＋ Somar / − Tirar.
+- **Ajustes**: Crescer e Encolher (em mm; crescer pega sempre ao menos os vizinhos), Inverter (Ctrl+I), Tudo (Ctrl+A), Limpar (Ctrl+D).
+- **Seleções salvas**: dar nome ("olho esquerdo") e, depois, Usar, ＋ ou apagar. Vão junto com o projeto e com o `.lyke`, e a seleção atual também.
+- Cada seleção é um passo do **histórico** (Ctrl+Z volta a seleção anterior), guardada compacta. As seleções antigas do histórico saem sozinhas acima do limite de memória (16 MB no modo leve).
+- A seleção é feita na **malha completa** e o destaque usa as posições da malha da tela (sem copiar a malha). Na malha leve, o destaque é aproximado pelos vértices.
+- Tempos no PC de 4 GB (simulado): arco (1,1 milhão de triângulos) — primeira varinha 0,4 s (monta a vizinhança uma vez), as seguintes ~50 ms, laço ~0,25 s, 116 MB no total. Smile: ~0,3 s na primeira, depois ~70 ms.
+- Atalhos: W varinha · L laço · Shift soma · Alt tira · Ctrl+D limpa · Ctrl+A tudo · Ctrl+I inverte.
+- Testes automáticos novos (`testes/unidade/selecao.test.mjs`): vizinhança, casca, ângulo, faces visíveis (também em peça "do avesso"), raio, laço, somar/tirar/inverter, crescer/encolher, formato compacto, varinha no smile (só o azul, sem sair do tênis) e na pintura fina (só os pedaços da cor, com a área certa). No navegador, no PC de 4 GB e no S23 Ultra: clique e toque, Shift, Ctrl+Z, ângulo com e sem "só visível", cor no F pintado, crescer/encolher/inverter, seleção salva, laço com mouse e com o dedo (sem girar a vista), pinça com o laço ligado, seleção voltando com o projeto, tempos no arco e no smile.
+
 ## v0.0.4 — Etapa 1.4: histórico e projetos (28/11/2026)
 
 - **Desfazer e refazer**: botões no topo (computador e tablet) e na barra de baixo do celular, **Ctrl+Z** e **Ctrl+Y** (ou Ctrl+Shift+Z), e no menu de segurar. Vale para trocar filamento, trocar cor da pintura e apagar pintura.

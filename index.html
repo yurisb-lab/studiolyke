@@ -52,7 +52,7 @@
           <svg viewBox="0 0 32 32"><path d="M16 3l11 6.3v13.4L16 29 5 22.7V9.3z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M5 17.5l22-6" stroke="var(--destaque)" stroke-width="2.4" stroke-linecap="round"/></svg>
         </span>
         <span class="nome-app"><strong>Fatiador</strong> <span class="sub">L.Y.K.E 3D</span></span>
-        <span class="versao" data-versao id="versao">v0.0.4</span>
+        <span class="versao" data-versao id="versao">v0.0.5</span>
       </div>
       <div class="topo-direita">
         <div class="grupo-historico fora-celular" role="group" aria-label="Histórico">
@@ -81,6 +81,10 @@
           <svg aria-hidden="true"><use href="#i-exportar"/></svg><span>Exportar 3MF</span>
         </button>
         <p class="dica">STL, OBJ, 3MF ou projeto .lyke. No computador, dá para arrastar o arquivo para a tela. O 3MF exportado abre no Bambu Studio com as placas, os filamentos e a pintura.</p>
+      </section>
+      <section id="sec-selecao">
+        <h2>Seleção</h2>
+        <div id="conteudo-selecao"></div>
       </section>
       <section>
         <h2>Projeto</h2>
@@ -133,6 +137,8 @@
         <div class="progresso-trilho"><div id="progresso-barra"></div></div>
       </div>
       <div class="soltar" aria-hidden="true"><p>Solte o arquivo aqui</p></div>
+      <div id="barra-selecao" class="barra-selecao" role="toolbar" aria-label="Seleção" hidden></div>
+      <svg id="laco" class="laco" aria-hidden="true" hidden><polygon points=""/></svg>
       <p id="erro-inicio" class="erro-inicio" hidden></p>
     </main>
 
@@ -154,7 +160,7 @@
         <h2>Memória</h2>
         <div id="conteudo-memoria"></div>
       </section>
-      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.4</span></p>
+      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.5</span></p>
     </aside>
 
     <nav class="barra-inferior" aria-label="Barra de ferramentas">

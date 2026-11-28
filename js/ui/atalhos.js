@@ -2,6 +2,7 @@
 //   Ctrl+O abrir · Ctrl+E exportar 3MF · Ctrl+S salvar projeto
 //   Ctrl+Z desfazer · Ctrl+Y ou Ctrl+Shift+Z refazer
 //   F enquadrar · 0/1/3/7 vistas · P mostrar/esconder a pintura
+//   Seleção: W varinha · L laço · Ctrl+D limpar · Ctrl+A tudo · Ctrl+I inverter
 
 export function ligarAtalhos(acoes) {
   document.addEventListener('keydown', (e) => {
@@ -34,9 +35,18 @@ export function ligarAtalhos(acoes) {
       if (acoes.desfazer) acoes.desfazer();
       return;
     }
+    const sel = acoes.selecao || {};
+    if (ctrl && !e.altKey && ['d', 'a', 'i'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      const f = { d: sel.limpar, a: sel.tudo, i: sel.inverter }[e.key.toLowerCase()];
+      if (f) f();
+      return;
+    }
     if (ctrl || e.altKey) return;
     const mapa = {
       f: () => acoes.enquadrar(),
+      w: () => sel.ferramenta && sel.ferramenta('varinha'),
+      l: () => sel.ferramenta && sel.ferramenta('laco'),
       p: () => acoes.pintura && acoes.pintura(),
       1: () => acoes.vista('frente'),
       3: () => acoes.vista('lado'),

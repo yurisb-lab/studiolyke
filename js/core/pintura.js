@@ -328,7 +328,7 @@ export function prepararTela(Meshopt, malha, limite) {
       q += resultados[k].length;
     });
     const limpos = semTriangulosFinos(malha.posicoes, juntos, faixas);
-    tela = { ...compactar(malha.posicoes, limpos), faixas };
+    tela = { ...compactar(malha.posicoes, limpos, { comOrigem: true }), faixas };
   }
 
   // 4) pedaços reais da pintura fina

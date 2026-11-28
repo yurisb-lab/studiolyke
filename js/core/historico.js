@@ -47,6 +47,7 @@ export class Historico {
     this.passos = [];
     this.posicao = 0; // quantos passos estão aplicados (os de depois são o "refazer")
     this.pontos = new Map(); // id do passo -> chave do ponto de restauração (modelo logo depois dele)
+    this.selecaoInicial = null; // seleção com que o projeto foi aberto (antes de qualquer passo de seleção)
     this.versao = (this.versao || 0) + 1; // muda a cada alteração (para o salvamento automático)
   }
 
@@ -140,7 +141,7 @@ export class Historico {
   /** A seleção em vigor numa posição do histórico (null = nenhuma). */
   selecaoEm(pos = this.posicao) {
     const i = this._indiceSelecaoEm(pos);
-    return i < 0 ? null : this.passos[i].selecao;
+    return i < 0 ? this.selecaoInicial : this.passos[i].selecao;
   }
 
   /**

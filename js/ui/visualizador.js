@@ -12,6 +12,27 @@ const COR_MESA = 0x22262d;
 const COR_GRADE = 0x2f343c;
 const COR_GRADE_FORTE = 0x3d444f;
 const COR_BORDA = 0x59616e;
+const COR_SELECAO = 0xff8a3d; // a cor de destaque do app
+
+// Profundidade para a seleção: distância da câmera (mm) / longe, guardada em 24 bits (RGB).
+const PROFUNDIDADE_VERTICE = `
+varying float vDist;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vDist = -mv.z;
+  gl_Position = projectionMatrix * mv;
+}`;
+const PROFUNDIDADE_FRAGMENTO = `
+precision highp float;
+uniform float uLonge;
+varying float vDist;
+void main() {
+  float v = floor(clamp(vDist / uLonge, 0.0, 1.0) * 16777215.0);
+  float r = floor(v / 65536.0);
+  float g = floor((v - r * 65536.0) / 256.0);
+  float b = v - r * 65536.0 - g * 256.0;
+  gl_FragColor = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
+}`;
 
 export const VISTAS = {
   iso: new THREE.Vector3(0.75, -1, 0.7),
@@ -60,6 +81,7 @@ export class Visualizador {
     this.cena.add(this.grupoModelo);
     this.peca = null;
     this.detalhe = null; // pedaços reais da pintura fina (malha à parte)
+    this.selecao = null; // destaque da seleção (grupo com 2 malhas)
     this.caixa = null;
     this.trianguloNaTela = 0;
     this.bytesGpu = 0;
@@ -158,6 +180,7 @@ export class Visualizador {
 
   /** Tira a peça da tela e libera a memória da placa de vídeo. */
   limpar() {
+    this.limparSelecao();
     if (this.peca) {
       this.grupoModelo.remove(this.peca);
       this.peca.geometry.dispose();
@@ -177,6 +200,7 @@ export class Visualizador {
    */
   mostrar(malhaTela, caixa, aparencia = null) {
     const enquadrarDepois = !this.peca;
+    this.limparSelecao(); // o destaque usa a geometria antiga: o app refaz depois
     if (this.peca) {
       this.grupoModelo.remove(this.peca);
       this.peca.geometry.dispose();
@@ -440,6 +464,169 @@ export class Visualizador {
     this.camera.updateProjectionMatrix();
     this.controles.update();
     this.desenhar();
+  }
+
+  // --- seleção -------------------------------------------------------------
+
+  /** Raio do ponto da tela (clientX, clientY) no espaço do modelo: { origem, direcao }. */
+  raio(clientX, clientY) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    const raio = new THREE.Raycaster();
+    this.camera.updateMatrixWorld(true);
+    raio.setFromCamera(ndc, this.camera);
+    const desloc = this.grupoModelo.position;
+    const o = raio.ray.origin.clone().sub(desloc);
+    const d = raio.ray.direction.clone().normalize();
+    return { origem: [o.x, o.y, o.z], direcao: [d.x, d.y, d.z] };
+  }
+
+  /** Ponto da tela (clientX, clientY) em pixels do canvas, com y para CIMA. */
+  pixelDoCanvas(clientX, clientY, largura, altura) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return [((clientX - r.left) / r.width) * largura, (1 - (clientY - r.top) / r.height) * altura];
+  }
+
+  /**
+   * Mapa de profundidade da peça como está na tela, para "só faces visíveis" e para o laço.
+   * Devolve { matriz, largura, altura, profundidade, olho, fatorPixel } (ver js/core/selecao.js).
+   */
+  vistaParaSelecao(ladoMax = 1024) {
+    const canvas = this.renderer.domElement;
+    const cw = Math.max(1, canvas.clientWidth || this.container.clientWidth);
+    const ch = Math.max(1, canvas.clientHeight || this.container.clientHeight);
+    // até ladoMax pixels no lado maior (no PC de 4 GB: ~3 MB de leitura, uma vez por clique)
+    const f = Math.min(Math.min(window.devicePixelRatio || 1, 2), ladoMax / Math.max(cw, ch));
+    const W = Math.max(16, Math.round(cw * f));
+    const H = Math.max(16, Math.round(ch * f));
+    this.camera.updateMatrixWorld(true);
+    this.grupoModelo.updateMatrixWorld(true);
+    const longe = this.camera.far;
+    const prof = new Float32Array(W * H).fill(Infinity);
+    if (this.peca) {
+      if (!this._matProf) {
+        this._matProf = new THREE.ShaderMaterial({
+          vertexShader: PROFUNDIDADE_VERTICE,
+          fragmentShader: PROFUNDIDADE_FRAGMENTO,
+          uniforms: { uLonge: { value: 1 } },
+          side: THREE.DoubleSide,
+        });
+      }
+      this._matProf.uniforms.uLonge.value = longe;
+      const alvo = new THREE.WebGLRenderTarget(W, H, { depthBuffer: true });
+      const cena = new THREE.Scene();
+      const copias = [this.peca, this.detalhe].filter(Boolean).map((m) => {
+        const c = new THREE.Mesh(m.geometry, this._matProf);
+        c.matrixAutoUpdate = false;
+        c.matrix.copy(m.matrixWorld);
+        c.matrixWorld.copy(m.matrixWorld);
+        return c;
+      });
+      cena.add(...copias);
+      const px = new Uint8Array(W * H * 4);
+      const fundo = this.renderer.getClearColor(new THREE.Color());
+      const alfa = this.renderer.getClearAlpha();
+      try {
+        this.renderer.setClearColor(0x000000, 0);
+        this.renderer.setRenderTarget(alvo);
+        this.renderer.clear();
+        this.renderer.render(cena, this.camera);
+        this.renderer.readRenderTargetPixels(alvo, 0, 0, W, H, px);
+      } finally {
+        this.renderer.setRenderTarget(null);
+        this.renderer.setClearColor(fundo, alfa);
+        alvo.dispose();
+      }
+      for (let i = 0, k = 0; i < W * H; i++, k += 4) {
+        if (px[k + 3] === 0) continue;
+        prof[i] = ((px[k] * 65536 + px[k + 1] * 256 + px[k + 2]) / 16777215) * longe;
+      }
+    }
+    const m = new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).multiply(this.grupoModelo.matrixWorld);
+    const olho = this.camera.position.clone().sub(this.grupoModelo.position);
+    return {
+      matriz: Float64Array.from(m.elements),
+      largura: W,
+      altura: H,
+      profundidade: prof,
+      olho: [olho.x, olho.y, olho.z],
+      fatorPixel: (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / H,
+    };
+  }
+
+  /**
+   * Destaque da seleção: { indices (triângulos da malha da tela), pedacos (Float32Array, 9 por pedaço) }.
+   * Usa as mesmas posições da peça (não copia a malha).
+   */
+  mostrarSelecao(d) {
+    this.limparSelecao();
+    if (!this.peca || !d) return;
+    if (!this._matSelecao) {
+      this._matSelecao = new THREE.MeshBasicMaterial({
+        color: COR_SELECAO,
+        transparent: true,
+        opacity: 0.6,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -6,
+      });
+    }
+    const grupo = new THREE.Group();
+    grupo.name = 'selecao';
+    grupo.renderOrder = 2;
+    if (d.indices && d.indices.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', this.peca.geometry.attributes.position);
+      g.setIndex(new THREE.BufferAttribute(d.indices, 1));
+      g.boundingBox = this.peca.geometry.boundingBox;
+      g.boundingSphere = this.peca.geometry.boundingSphere;
+      const m = new THREE.Mesh(g, this._matSelecao);
+      m.renderOrder = 2;
+      m.userData.posicaoDaPeca = true;
+      grupo.add(m);
+    }
+    if (d.pedacos && d.pedacos.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(d.pedacos, 3));
+      g.boundingBox = this.peca.geometry.boundingBox;
+      g.boundingSphere = this.peca.geometry.boundingSphere;
+      const m = new THREE.Mesh(g, this._matSelecao);
+      m.renderOrder = 2;
+      grupo.add(m);
+    }
+    this.selecao = grupo;
+    this.bytesSelecao = (d.indices ? d.indices.byteLength : 0) + (d.pedacos ? d.pedacos.byteLength : 0);
+    this.grupoModelo.add(grupo);
+    this.desenhar();
+  }
+
+  limparSelecao() {
+    if (!this.selecao) return;
+    this.grupoModelo.remove(this.selecao);
+    for (const m of this.selecao.children) {
+      // a posição de uma delas é a da peça: sai antes do dispose (senão a peça perde o buffer)
+      if (m.userData.posicaoDaPeca) m.geometry.deleteAttribute('position');
+      m.geometry.dispose();
+    }
+    this.selecao = null;
+    this.bytesSelecao = 0;
+    this.desenhar();
+  }
+
+  /** Triângulos destacados na tela (para os testes). */
+  triangulosDestacados() {
+    if (!this.selecao) return 0;
+    let n = 0;
+    for (const m of this.selecao.children) n += m.geometry.index ? m.geometry.index.count / 3 : m.geometry.attributes.position.count / 3;
+    return n;
+  }
+
+  /** Com o laço ligado, o arrastar de um dedo / botão esquerdo desenha em vez de girar. */
+  modoLaco(ligado) {
+    this.controles.mouseButtons.LEFT = ligado ? null : THREE.MOUSE.ROTATE;
+    this.controles.touches.ONE = ligado ? null : THREE.TOUCH.ROTATE;
   }
 
   infoGpu() {
