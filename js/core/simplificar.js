@@ -16,9 +16,12 @@ export function simplificarIndices(Meshopt, posicoes, indices, alvoTriangulos, o
   const alvoIdx = Math.max(3, Math.floor(alvoTriangulos) * 3);
   // Regularize: triângulos mais bem formados (sem lascas finas que viram pontos pretos na tela)
   const flags = opcoes.esparso ? ['Sparse', 'Regularize'] : ['Regularize'];
+  // Borda travada: as fronteiras de cor da pintura não mexem (nem abrem frestas).
+  if (opcoes.travarBorda) flags.push('LockBorder');
   let [res] = Meshopt.simplify(indices, posicoes, 3, alvoIdx, opcoes.erroMax ?? 0.02, flags);
-  // Se a forma "boa" não chegou ao alvo, termina com a simplificação rápida.
-  if (res.length > alvoIdx * 1.15) {
+  // Se a forma "boa" não chegou ao alvo, termina com a simplificação rápida
+  // (que não respeita bordas: não é usada com a borda travada).
+  if (!opcoes.travarBorda && res.length > alvoIdx * 1.15) {
     [res] = Meshopt.simplifySloppy(res, posicoes, 3, null, alvoIdx, 1);
   }
   return res;
@@ -51,30 +54,7 @@ function simplificarPorFaixa(Meshopt, malha, faixas, proporcao, opcoes) {
   faixas.forEach((f, k) => {
     const sub = malha.indices.subarray(f.primeiroTriangulo * 3, (f.primeiroTriangulo + f.numTriangulos) * 3);
     const alvo = Math.max(12, Math.round(f.numTriangulos * proporcao));
-    let r;
-    const p = partes[k] && partes[k].parte;
-    if (sub.length / 3 <= alvo) {
-      r = sub;
-    } else if (p && p.numVertices > 0) {
-      const v0 = p.primeiroVertice;
-      const local = new Uint32Array(sub.length);
-      let dentro = true;
-      for (let i = 0; i < sub.length; i++) {
-        const v = sub[i] - v0;
-        if (v < 0 || v >= p.numVertices) { dentro = false; break; }
-        local[i] = v;
-      }
-      if (dentro) {
-        const pos = emFloat32(malha.posicoes.subarray(v0 * 3, (v0 + p.numVertices) * 3));
-        r = simplificarIndices(Meshopt, pos, local, alvo, opcoes);
-        if (r === local) r = sub;
-        else for (let i = 0; i < r.length; i++) r[i] += v0;
-      } else {
-        r = simplificarIndices(Meshopt, pos32(), sub, alvo, opcoes);
-      }
-    } else {
-      r = simplificarIndices(Meshopt, pos32(), sub, alvo, opcoes);
-    }
+    const r = simplificarTrecho(Meshopt, malha, partes[k] && partes[k].parte, sub, alvo, opcoes, pos32);
     resultados.push(r);
     n += r.length;
   });
@@ -89,7 +69,33 @@ function simplificarPorFaixa(Meshopt, malha, faixas, proporcao, opcoes) {
   return { indices, faixas: novas };
 }
 
-function emFloat32(a) {
+/**
+ * Simplifica um trecho de índices (sub) de uma parte. Usa só os vértices da parte
+ * quando ela tem faixa própria (bem mais rápido). Devolve índices da malha inteira.
+ */
+export function simplificarTrecho(Meshopt, malha, parte, sub, alvo, opcoes, pos32) {
+  if (sub.length / 3 <= alvo) return sub;
+  if (parte && parte.numVertices > 0) {
+    const v0 = parte.primeiroVertice;
+    const local = new Uint32Array(sub.length);
+    let dentro = true;
+    for (let i = 0; i < sub.length; i++) {
+      const v = sub[i] - v0;
+      if (v < 0 || v >= parte.numVertices) { dentro = false; break; }
+      local[i] = v;
+    }
+    if (dentro) {
+      const pos = emFloat32(malha.posicoes.subarray(v0 * 3, (v0 + parte.numVertices) * 3));
+      const r = simplificarIndices(Meshopt, pos, local, alvo, opcoes);
+      if (r === local) return sub;
+      for (let i = 0; i < r.length; i++) r[i] += v0;
+      return r;
+    }
+  }
+  return simplificarIndices(Meshopt, pos32(), sub, alvo, opcoes);
+}
+
+export function emFloat32(a) {
   return a instanceof Float32Array ? a : new Float32Array(a);
 }
 
@@ -148,9 +154,9 @@ export function simplificarMalha(Meshopt, malha, alvoTriangulos) {
     const soma = partes.reduce((s2, p) => s2 + p.numTriangulos, 0);
     return { ...o, partes, primeiroTriangulo: primeiro, numTriangulos: soma };
   });
-  if (malha.pintura) {
+  if (malha.pinturaCor || malha.pinturaOutros) {
     avisos.push('A pintura do Bambu foi descartada ao simplificar (os triângulos mudaram). Para manter a pintura, abra o modelo completo.');
   }
-  const { posicoes: _p, indices: _i, objetos: _o, avisos: _a, pintura: _t, ...extras } = malha;
-  return criarMalha({ posicoes: c.posicoes, indices: c.indices, objetos, avisos, extras: { ...extras, pintura: null, trianguloPintados: 0 } });
+  const { posicoes: _p, indices: _i, objetos: _o, avisos: _a, pinturaCor: _c, pinturaOutros: _t, ...extras } = malha;
+  return criarMalha({ posicoes: c.posicoes, indices: c.indices, objetos, avisos, extras: { ...extras, pinturaCor: null, pinturaOutros: null, trianguloPintados: 0 } });
 }

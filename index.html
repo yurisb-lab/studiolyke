@@ -46,7 +46,7 @@
           <svg viewBox="0 0 32 32"><path d="M16 3l11 6.3v13.4L16 29 5 22.7V9.3z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M5 17.5l22-6" stroke="var(--destaque)" stroke-width="2.4" stroke-linecap="round"/></svg>
         </span>
         <span class="nome-app"><strong>Fatiador</strong> <span class="sub">L.Y.K.E 3D</span></span>
-        <span class="versao" data-versao id="versao">v0.0.2</span>
+        <span class="versao" data-versao id="versao">v0.0.3</span>
       </div>
       <div class="topo-direita">
         <button type="button" id="chip-modo-leve" class="chip" aria-pressed="false">Modo leve</button>
@@ -91,7 +91,7 @@
             <svg aria-hidden="true"><use href="#i-lado"/></svg><span>Lado</span>
           </button>
         </div>
-        <p class="dica so-computador">Mouse: arrastar gira, rodinha dá zoom, botão direito arrasta a vista. Segurar o clique abre o menu.</p>
+        <p class="dica so-computador">Mouse: arrastar gira, rodinha dá zoom, botão direito arrasta a vista. Segurar o clique abre o menu. P mostra ou esconde a pintura.</p>
         <p class="dica so-toque">Um dedo gira, pinça dá zoom, dois dedos arrastam. Segure o dedo para abrir o menu.</p>
       </section>
     </aside>
@@ -127,7 +127,7 @@
         <h2>Memória</h2>
         <div id="conteudo-memoria"></div>
       </section>
-      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.2</span></p>
+      <p class="rodape-painel">Fatiador L.Y.K.E 3D <span data-versao>v0.0.3</span></p>
     </aside>
 
     <nav class="barra-inferior" aria-label="Barra de ferramentas">
@@ -153,6 +153,15 @@
       <button type="button" id="dlg-simplificar" class="botao principal">Simplificar ao abrir</button>
       <button type="button" id="dlg-completo" class="botao">Abrir completo</button>
       <button type="button" id="dlg-cancelar" class="botao discreto">Cancelar</button>
+    </div>
+  </dialog>
+
+  <dialog id="dialogo-confirmar" class="dialogo">
+    <h2>Confirmar</h2>
+    <p id="confirmar-texto"></p>
+    <div class="dialogo-botoes">
+      <button type="button" id="confirmar-sim" class="botao principal">Sim</button>
+      <button type="button" id="confirmar-nao" class="botao discreto">Cancelar</button>
     </div>
   </dialog>
 

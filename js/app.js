@@ -4,7 +4,8 @@ import { VERSAO } from './config.js';
 import { medirCapacidade, perfilEmUso } from './core/capacidade.js';
 import { estimarAbertura, usoAtual, formatarMB, formatarTriangulos, extensao, FORMATOS, MB } from './core/memoria.js';
 import { bytesDaMalha, transferiveis } from './core/malha.js';
-import { aparenciaDasPartes, faixasDasPartes, trocarFilamento } from './core/projeto.js';
+import { aparenciaDasPartes, faixasDasPartes, trocarFilamento, corDoFilamento, todasAsPartes, rotuloFilamento } from './core/projeto.js';
+import { trocarCorDaPintura, trocarCorNaTela } from './core/pintura.js';
 import * as armazenamento from './core/armazenamento.js';
 import { executar } from './core/tarefas.js';
 import { Visualizador } from './ui/visualizador.js';
@@ -24,6 +25,8 @@ const estado = {
   tela: null, // malha leve da tela, ou null quando a tela usa a própria malha
   caixa: null,
   ocupado: false,
+  mostrarPintura: true,
+  limiteDaTela: 0, // limite de triângulos usado para montar a tela atual
 };
 
 let visualizador;
@@ -36,6 +39,7 @@ async function iniciar() {
   estado.capacidade = medirCapacidade();
   estado.preferenciaLeve = await armazenamento.ler('preferencias', 'modoLeve', 'auto');
   estado.ondeSalva = await armazenamento.onde();
+  estado.mostrarPintura = await armazenamento.ler('preferencias', 'mostrarPintura', true);
   estado.perfil = perfilEmUso(estado.capacidade, estado.preferenciaLeve);
   document.documentElement.dataset.modoLeve = estado.perfil.modoLeve ? 'ligado' : 'desligado';
 
@@ -52,6 +56,7 @@ async function iniciar() {
     { texto: 'Vista 3D', acao: () => visualizador.enquadrar('iso') },
     '-',
     { texto: estado.perfil.modoLeve ? 'Desligar o modo leve' : 'Ligar o modo leve', acao: () => mudarModoLeve(estado.perfil.modoLeve ? 'desligado' : 'ligado') },
+    ...(temPintura() ? [{ texto: estado.mostrarPintura ? 'Esconder a pintura' : 'Mostrar a pintura', acao: () => mudarMostrarPintura(!estado.mostrarPintura) }] : []),
     { texto: 'Abrir modelo…', acao: escolherArquivo },
     ...(estado.malha ? [{ texto: 'Exportar 3MF', acao: exportar3mf }] : []),
   ]);
@@ -69,6 +74,7 @@ async function iniciar() {
     exportar: exportar3mf,
     enquadrar: () => visualizador.enquadrar(),
     vista: (v) => visualizador.enquadrar(v),
+    pintura: () => { if (temPintura()) mudarMostrarPintura(!estado.mostrarPintura); },
   });
 
   ligarBotoes();
@@ -85,7 +91,7 @@ async function iniciar() {
   registrarServiceWorker();
 
   // Para os testes automáticos e para diagnóstico no console.
-  window.__fatiador = { estado, visualizador, abrirArquivo, mudarModoLeve, exportar3mf, versao: VERSAO };
+  window.__fatiador = { estado, visualizador, abrirArquivo, mudarModoLeve, exportar3mf, mudarMostrarPintura, trocarPintura, versao: VERSAO };
   document.documentElement.dataset.pronto = 'sim';
 }
 
@@ -109,12 +115,26 @@ function ligarBotoes() {
     });
   });
   $('painel-propriedades').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-modo-leve]');
+    // só os botões: a própria página (<html data-modo-leve>) também tem esse atributo
+    const b = e.target.closest('button[data-modo-leve]');
     if (b) mudarModoLeve(b.dataset.modoLeve);
   });
   $('painel-propriedades').addEventListener('change', (e) => {
-    const sel = e.target.closest('.seletor-filamento');
+    if (e.target.id === 'mostrar-pintura') {
+      mudarMostrarPintura(e.target.checked);
+      return;
+    }
+    const sel = e.target.closest('.seletor-filamento[data-objeto]');
     if (sel) mudarFilamento(Number(sel.dataset.objeto), Number(sel.dataset.parte), Number(sel.value));
+  });
+  $('painel-propriedades').addEventListener('click', (e) => {
+    if (e.target.closest('#pintura-trocar')) {
+      const onde = $('pintura-onde').value;
+      trocarPintura({ de: Number($('pintura-de').value), para: Number($('pintura-para').value), parteIndice: onde === '' ? null : Number(onde) });
+      return;
+    }
+    const apagar = e.target.closest('[data-apagar-pintura]');
+    if (apagar) apagarPinturaDaParte(Number(apagar.dataset.apagarPintura));
   });
   $('chip-modo-leve').addEventListener('click', () => mudarModoLeve(estado.perfil.modoLeve ? 'desligado' : 'ligado'));
   $('medidor').addEventListener('click', () => {
@@ -191,7 +211,8 @@ async function abrirArquivo(arquivo) {
     estado.malha = r.malha;
     estado.tela = r.tela;
     estado.caixa = r.caixa;
-    visualizador.mostrar(r.tela || r.malha, r.caixa, aparencia());
+    estado.limiteDaTela = estado.perfil.limiteTela;
+    visualizador.mostrar(telaParaMostrar(), r.caixa, aparencia());
     visualizador.enquadrar('iso');
     const s = ((performance.now() - t0) / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     avisar(`${arquivo.name} aberto em ${s} s (${formatarTriangulos(r.malha.indices.length / 3)} triângulos).`);
@@ -275,9 +296,12 @@ async function refazerTelaSePreciso() {
   const tri = m.indices.length / 3;
   const limite = estado.perfil.limiteTela;
   const naTela = estado.tela ? estado.tela.indices.length / 3 : tri;
-  const precisa = tri <= limite ? !!estado.tela : (naTela > limite * 1.15 || naTela < Math.min(tri, limite) * 0.6);
+  // com pintura a tela é sempre montada no worker (por cor); refaz se o limite mudou
+  const precisa = m.pinturaCor
+    ? estado.limiteDaTela !== limite
+    : (tri <= limite ? !!estado.tela : (naTela > limite * 1.15 || naTela < Math.min(tri, limite) * 0.6));
   if (!precisa) return;
-  if (tri <= limite) {
+  if (tri <= limite && !m.pinturaCor) {
     estado.tela = null;
     visualizador.mostrar(m, estado.caixa, aparencia());
     return;
@@ -289,7 +313,8 @@ async function refazerTelaSePreciso() {
     const r = await executar('tela', { malha: m, limiteTela: limite }, transferiveis(m), mostrarProgresso);
     estado.malha = r.malha;
     estado.tela = r.tela;
-    visualizador.mostrar(r.tela || r.malha, estado.caixa, aparencia());
+    estado.limiteDaTela = limite;
+    visualizador.mostrar(telaParaMostrar(), estado.caixa, aparencia());
   } catch (erro) {
     avisar(`Não consegui refazer a malha da tela: ${erro.message}. Abra o modelo de novo.`, 'erro', 0);
     visualizador.limpar();
@@ -300,12 +325,110 @@ async function refazerTelaSePreciso() {
 
 // --- filamentos e exportação ----------------------------------------------------
 
-/** Cores das partes na tela: faixas da malha leve (ou da completa) + cor de cada parte. */
+/**
+ * Cores na tela: cada faixa (da malha leve ou da completa) é uma parte, ou, com
+ * pintura, uma parte numa cor da pintura (estado 0 = cor da parte).
+ */
 function aparencia() {
   const m = estado.malha;
   if (!m) return null;
+  const partes = aparenciaDasPartes(m);
   const faixas = estado.tela && estado.tela.faixas ? estado.tela.faixas : faixasDasPartes(m);
-  return { faixas, partes: aparenciaDasPartes(m) };
+  const de = (f, k) => {
+    const base = partes[f.parte ?? k] || partes[0];
+    if (f.estado > 0 && estado.mostrarPintura) return { ...base, cor: corDoFilamento(m, f.estado) };
+    return base;
+  };
+  const det = estado.tela && estado.tela.detalhe;
+  return {
+    faixas,
+    partes: faixas.map(de),
+    detalhe: det ? { faixas: det.faixas, partes: det.faixas.map(de) } : null,
+  };
+}
+
+/** O que vai para a tela: a malha leve, ou a completa (a tela com pintura pode usar as posições dela). */
+function telaParaMostrar() {
+  const m = estado.malha, t = estado.tela;
+  if (!t) return m;
+  return { posicoes: t.posicoes || m.posicoes, indices: t.indices, detalhe: t.detalhe || null };
+}
+
+function temPintura() {
+  return !!(estado.malha && estado.malha.pinturaCor && estado.malha.pinturaCor.resumo && estado.malha.pinturaCor.resumo.estados.length);
+}
+
+function recolorir() {
+  const a = aparencia();
+  if (a) visualizador.colorir(a.faixas, a.partes, a.detalhe);
+}
+
+async function mudarMostrarPintura(mostrar) {
+  estado.mostrarPintura = !!mostrar;
+  recolorir();
+  atualizarPaineis();
+  try {
+    await armazenamento.gravar('preferencias', 'mostrarPintura', estado.mostrarPintura);
+  } catch (e) {
+    console.warn('Não salvou a preferência da pintura', e);
+  }
+}
+
+/**
+ * Troca uma cor da pintura por outra (para = 0 tira a pintura dessa cor), numa
+ * parte ou no modelo todo. Nesta etapa é uma troca direta; entra no histórico na 1.4.
+ */
+function trocarPintura({ de, para, parteIndice = null }) {
+  const m = estado.malha;
+  if (!m || !m.pinturaCor || estado.ocupado) return 0;
+  if (de !== 'todas' && de === para) {
+    avisar('Escolha uma cor diferente para trocar.', 'aviso');
+    return 0;
+  }
+  let n;
+  try {
+    n = trocarCorDaPintura(m, { de, para, parteIndice });
+  } catch (erro) {
+    avisar(erro.message, 'erro');
+    return 0;
+  }
+  trocarCorNaTela(estado.tela, { de, para, parteIndice });
+  recolorir();
+  atualizarPaineis();
+  atualizarMedidor();
+  const onde = parteIndice == null ? 'no modelo todo' : `em ${nomeDaParte(parteIndice)}`;
+  if (de === 'todas') avisar(`Pintura apagada ${onde} (${n.toLocaleString('pt-BR')} triângulos).`, 'ok');
+  else if (!n) avisar(`A cor ${de} não aparece ${onde}.`, 'aviso');
+  else {
+    const para2 = para === 0 ? 'sem pintura' : `filamento ${rotuloFilamento(m, para)}`;
+    avisar(`Cor ${rotuloFilamento(m, de)} trocada por ${para2} ${onde} (${n.toLocaleString('pt-BR')} triângulos).`, 'ok');
+  }
+  return n;
+}
+
+function nomeDaParte(k) {
+  const item = todasAsPartes(estado.malha)[k];
+  if (!item) return 'parte';
+  return item.objeto.partes.length > 1 ? `"${item.objeto.nome} › ${item.parte.nome}"` : `"${item.objeto.nome}"`;
+}
+
+async function apagarPinturaDaParte(k) {
+  if (!estado.malha || estado.ocupado) return;
+  const ok = await confirmar(`Apagar toda a pintura de ${nomeDaParte(k)}? Ainda não dá para desfazer (o desfazer chega na próxima etapa).`, 'Apagar pintura');
+  if (ok) trocarPintura({ de: 'todas', parteIndice: k });
+}
+
+function confirmar(texto, botao) {
+  const dialogo = $('dialogo-confirmar');
+  $('confirmar-texto').textContent = texto;
+  $('confirmar-sim').textContent = botao;
+  return new Promise((resolver) => {
+    const responder = (v) => { dialogo.close(); resolver(v); };
+    $('confirmar-sim').onclick = () => responder(true);
+    $('confirmar-nao').onclick = () => responder(false);
+    dialogo.oncancel = (e) => { e.preventDefault(); responder(false); };
+    dialogo.showModal();
+  });
 }
 
 function mudarFilamento(io, ip, n) {
@@ -315,8 +438,7 @@ function mudarFilamento(io, ip, n) {
   } catch (erro) {
     avisar(erro.message, 'erro');
   }
-  const a = aparencia();
-  visualizador.colorir(a.faixas, a.partes);
+  recolorir();
   atualizarPaineis();
 }
 
@@ -356,7 +478,7 @@ async function exportar3mf() {
     const r = await executar('exportar', { malha: m, miniatura }, transferiveis(m), mostrarProgresso);
     estado.malha = r.malha;
     // Sem malha leve, a tela usava os próprios dados da malha: mostra de novo.
-    if (!estado.tela) visualizador.mostrar(estado.malha, estado.caixa, aparencia());
+    if (!estado.tela || !estado.tela.posicoes) visualizador.mostrar(telaParaMostrar(), estado.caixa, aparencia());
     if (r.erro) throw new Error(r.erro);
     baixar(r.arquivo, nome);
     estado.ultimaExportacao = { nome, bytes: r.arquivo.size, info: r.info };

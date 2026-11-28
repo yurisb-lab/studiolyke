@@ -1,5 +1,6 @@
 // Leitor de 3MF: geometria, objetos, partes, filamentos, placas e a pintura do Bambu
-// (guardada como veio; a decodificação da pintura é a etapa 1.3).
+// (a de cor vira a árvore de subdivisão compacta de js/io/pintura-bambu.js; a de
+// suporte e costura é guardada como veio).
 //
 // Lê os bytes do XML diretamente (os Workers não têm DOMParser e um XML de
 // centenas de MB não pode virar uma string inteira no PC de 4 GB).
@@ -11,6 +12,7 @@ import { ArrayCrescente, criarMalha } from '../core/malha.js';
 import { IDENTIDADE, garantirEstrutura } from '../core/projeto.js';
 import { lerNumero, lerInteiro, ehEspaco, textoDe, desfazerEntidades, codigos } from './texto.js';
 import { lerXml, filhos } from './xml-simples.js';
+import { hexValido, hexParaNibbles, analisar } from './pintura-bambu.js';
 
 const ESCALA_UNIDADE = {
   micron: 0.001,
@@ -76,7 +78,7 @@ export async function ler3mf(arquivo, JSZip, aoProgresso) {
   // Cada item da placa vira um objeto; cada malha dentro dele vira uma parte.
   const instancias = []; // { obj (malha), matriz (completa), parte }
   const objetos = [];
-  let totalVert = 0, totalTri = 0, pintados = 0, comExtras = 0;
+  let totalVert = 0, totalTri = 0, pintados = 0, comExtras = 0, comCor = 0;
   const contagemItem = new Map();
 
   async function resolver(caminho, id, matrizRel, profundidade, partes) {
@@ -139,6 +141,7 @@ export async function ler3mf(arquivo, JSZip, aoProgresso) {
       totalTri += nt;
       pintados += obj.pintados;
       if (obj.extrasIni) comExtras++;
+      if (obj.corIni) comCor++;
     }
     objeto.numTriangulos = totalTri - objeto.primeiroTriangulo;
     objetos.push(objeto);
@@ -155,7 +158,13 @@ export async function ler3mf(arquivo, JSZip, aoProgresso) {
     for (const { obj } of instancias) if (obj.extras) bytesExtras += obj.extras.length;
     pintura = { atributos: new Uint8Array(bytesExtras), inicio: new Uint32Array(totalTri + 1) };
   }
-  let pv = 0, pt = 0, tri = 0, pe = 0;
+  let pinturaCor = null;
+  if (comCor) {
+    let n = 0;
+    for (const { obj } of instancias) if (obj.cor) n += obj.cor.length;
+    pinturaCor = { codigos: new Uint8Array(n), inicio: new Uint32Array(totalTri + 1) };
+  }
+  let pv = 0, pt = 0, tri = 0, pe = 0, pc = 0;
   let invalidos = 0;
   for (const { obj, matriz: m } of instancias) {
     const p = obj.posicoes;
@@ -181,8 +190,8 @@ export async function ler3mf(arquivo, JSZip, aoProgresso) {
       indices[pt++] = b + pv;
       indices[pt++] = c + pv;
     }
+    const nt = t.length / 3;
     if (pintura) {
-      const nt = t.length / 3;
       if (obj.extrasIni) {
         pintura.atributos.set(obj.extras, pe);
         for (let k = 0; k < nt; k++) pintura.inicio[tri + k] = obj.extrasIni[k] + pe;
@@ -190,15 +199,33 @@ export async function ler3mf(arquivo, JSZip, aoProgresso) {
       } else {
         pintura.inicio.fill(pe, tri, tri + nt);
       }
-      tri += nt;
     }
+    if (pinturaCor) {
+      if (obj.corIni) {
+        pinturaCor.codigos.set(obj.cor, pc);
+        for (let k = 0; k < nt; k++) pinturaCor.inicio[tri + k] = obj.corIni[k] + pc;
+        pc += obj.cor.length;
+      } else {
+        pinturaCor.inicio.fill(pc, tri, tri + nt);
+      }
+    }
+    tri += nt;
     pv += nv;
   }
   if (pintura) pintura.inicio[totalTri] = pe;
+  if (pinturaCor) pinturaCor.inicio[totalTri] = pc;
 
   if (invalidos) avisos.push(`${invalidos} triângulo(s) apontavam para vértices que não existem e foram anulados.`);
-  if (pintados) {
-    avisos.push(`Pintura do Bambu encontrada em ${pintados.toLocaleString('pt-BR')} triângulo(s). Ela ainda não aparece na tela (chega na etapa 1.3), mas fica guardada e volta igual ao exportar.`);
+  if (pinturaCor) {
+    // Confere cada árvore: código quebrado fica guardado e volta igual, mas não aparece na tela.
+    let quebrados = 0;
+    const { codigos, inicio } = pinturaCor;
+    for (let k = 0; k < totalTri; k++) {
+      if (inicio[k + 1] > inicio[k] && !analisar(codigos, inicio[k], inicio[k + 1]).valido) quebrados++;
+    }
+    if (quebrados) {
+      avisos.push(`${quebrados.toLocaleString('pt-BR')} triângulo(s) têm uma pintura que o app não entendeu. Ela não aparece na tela, mas fica guardada e volta igual ao exportar.`);
+    }
   }
 
   // Placas: cada <model_instance> aponta para um objeto e uma instância.
@@ -222,7 +249,8 @@ export async function ler3mf(arquivo, JSZip, aoProgresso) {
       trianguloPintados: pintados,
       filamentos,
       placas,
-      pintura,
+      pinturaOutros: pintura,
+      pinturaCor,
       arquivo3mf: {
         aplicacao: raiz.metadados.find(([n]) => n === 'Application')?.[1] || '',
         metadados: raiz.metadados,
@@ -459,10 +487,14 @@ export function lerModeloXml(bytes, caminho, aoProgresso) {
         _idx: null,
         _ext: null,
         _extIni: null,
+        _cor: null,
+        _corIni: null,
         posicoes: null,
         indices: null,
         extras: null,
         extrasIni: null,
+        cor: null,
+        corIni: null,
         componentes: [],
         pintados: 0,
       };
@@ -505,8 +537,13 @@ function finalizarObjeto(obj) {
       obj.extrasIni = obj._extIni.final();
       obj.extras = obj._ext.final();
     }
+    if (obj._corIni) {
+      obj._corIni.push1(obj._cor.tamanho);
+      obj.corIni = obj._corIni.final();
+      obj.cor = obj._cor.final();
+    }
   }
-  obj._pos = obj._idx = obj._ext = obj._extIni = null;
+  obj._pos = obj._idx = obj._ext = obj._extIni = obj._cor = obj._corIni = null;
 }
 
 function pularAte(bytes, i, codigo) {
@@ -605,6 +642,7 @@ function lerTriangulo(bytes, i, fim, obj) {
   let pintado = false;
   const temMalha = obj && obj._idx;
   let registrado = false;
+  let comCor = false;
   for (;;) {
     while (i < n && ehEspaco(bytes[i])) i++;
     const c = bytes[i];
@@ -630,7 +668,17 @@ function lerTriangulo(bytes, i, fim, obj) {
       while (i < n && bytes[i] !== aspas) i++;
       const nomeAtr = textoDe(bytes, ini, ini + len);
       const alvo = ATRIBUTOS_GUARDADOS.get(nomeAtr);
-      if (alvo) {
+      if (alvo === 'paint_color' && (comCor || hexValido(bytes, vIni, i))) {
+        // pintura de cor: vira nibbles na ordem de leitura (um repetido é ignorado)
+        if (!comCor) {
+          registrarCor(obj);
+          comCor = true;
+          const cor = obj._cor;
+          cor.garantir(cor.tamanho + (i - vIni));
+          cor.tamanho = hexParaNibbles(bytes, vIni, i, cor.dados, cor.tamanho);
+          pintado = true;
+        }
+      } else if (alvo) {
         if (!registrado) { registrarExtras(obj); registrado = true; }
         const ext = obj._ext;
         const cab = BYTES_ATRIBUTO.get(alvo);
@@ -649,6 +697,7 @@ function lerTriangulo(bytes, i, fim, obj) {
   }
   if (temMalha) {
     if (obj._extIni && !registrado) obj._extIni.push1(obj._ext.tamanho);
+    if (obj._corIni && !comCor) obj._corIni.push1(obj._cor.tamanho);
     obj._idx.push3(a, b, c3);
     if (pintado) obj.pintados++;
   }
@@ -669,4 +718,17 @@ function registrarExtras(obj) {
     obj._extIni.tamanho = tri;
   }
   obj._extIni.push1(obj._ext.tamanho);
+}
+
+/** Como registrarExtras, para a pintura de cor (nibbles). */
+function registrarCor(obj) {
+  if (!obj._corIni) {
+    const tri = obj._idx.tamanho / 3;
+    obj._cor = new ArrayCrescente(Uint8Array, 1 << 16);
+    obj._corIni = new ArrayCrescente(Uint32Array, Math.max(1024, tri * 2));
+    obj._corIni.garantir(tri);
+    obj._corIni.dados.fill(0, 0, tri);
+    obj._corIni.tamanho = tri;
+  }
+  obj._corIni.push1(obj._cor.tamanho);
 }

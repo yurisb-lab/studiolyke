@@ -3,7 +3,7 @@
 // a cópia guardada quando estiver sem internet.
 // Bibliotecas do CDN: têm versão fixa, então a cópia guardada vale para sempre.
 
-const VERSAO = 'v0.0.2'; // igual a js/config.js (um teste confere)
+const VERSAO = 'v0.0.3'; // igual a js/config.js (um teste confere)
 const CACHE_APP = `fatiador-app-${VERSAO}`;
 const CACHE_CDN = 'fatiador-cdn';
 
@@ -18,12 +18,14 @@ const ARQUIVOS_APP = [
   'js/core/capacidade.js',
   'js/core/malha.js',
   'js/core/memoria.js',
+  'js/core/pintura.js',
   'js/core/projeto.js',
   'js/core/simplificar.js',
   'js/core/tarefas.js',
   'js/io/3mf.js',
   'js/io/3mf-gravar.js',
   'js/io/obj.js',
+  'js/io/pintura-bambu.js',
   'js/io/stl.js',
   'js/io/texto.js',
   'js/io/xml-simples.js',

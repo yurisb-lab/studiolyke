@@ -180,7 +180,10 @@ const estado = (pagina) => pagina.evaluate(() => {
     // heap do JS + typed arrays da malha (que ficam fora do heap)
     totalMB: (performance.memory ? performance.memory.usedJSHeapSize : 0) / 1048576
       + ((e.malha ? e.malha.posicoes.byteLength + e.malha.indices.byteLength : 0)
-      + (e.tela ? e.tela.posicoes.byteLength + e.tela.indices.byteLength : 0)) / 1048576,
+      + (e.tela ? (e.tela.posicoes ? e.tela.posicoes.byteLength : 0) + e.tela.indices.byteLength
+        + (e.tela.detalhe ? e.tela.detalhe.posicoes.byteLength : 0) : 0)) / 1048576,
+    pintura: e.malha && e.malha.pinturaCor ? e.malha.pinturaCor.resumo : null,
+    pedacosNaTela: e.tela && e.tela.detalhe ? e.tela.detalhe.posicoes.length / 9 : 0,
     erroVisivel: document.querySelector('.aviso-rapido.erro')?.textContent || '',
   };
 });
@@ -317,7 +320,50 @@ async function principal() {
       await abrirModelo(pagina, arq.bambu);
       e = await estado(pagina);
       confere(e.objetos.length === 2 && e.objetos[0] === 'Boneco & olho', '3MF do Bambu abre com os objetos', JSON.stringify(e.objetos));
-      confere(e.avisos.some((a) => a.includes('Pintura do Bambu')), 'avisa que a pintura chega na etapa 1.3');
+      confere(e.avisos.length === 0 && e.pintura && e.pintura.pintados === 6, 'pintura do Bambu lida, sem aviso', JSON.stringify(e.avisos));
+
+      // ---- pintura do Bambu (etapa 1.3) ----
+      await abrirModelo(pagina, arq.conferencia);
+      e = await estado(pagina);
+      const AZUL = '#1B2A6B', BEGE = '#D9C49A', BRANCO = '#FFFFFF', PRETO = '#1A1A1A';
+      confere(e.pintura && e.pintura.subdivididos === 8 && e.pedacosNaTela > 500, `cubo de conferência: pintura fina na tela (${e.pedacosNaTela} pedaços)`);
+      let coresP = await coresNaTela(pagina);
+      confere([AZUL, BEGE, BRANCO].every((c) => coresP.includes(c)), `pintura aparece nas cores dos filamentos (${coresP.join(' ')})`);
+      confere(await pagina.locator('#lista-cores-pintura li').count() === 2, 'painel lista as 2 cores da pintura com a área');
+      confere(await pagina.locator('[data-apagar-pintura]').count() === 2, 'cada cubo pintado tem "Apagar pintura"');
+      await pagina.evaluate(() => window.__fatiador.visualizador.enquadrar('cima'));
+      await pagina.screenshot({ path: join(RESULTADOS, 'pintura-cima.png') });
+      await pagina.evaluate(() => window.__fatiador.visualizador.enquadrar('frente'));
+      await pagina.screenshot({ path: join(RESULTADOS, 'pintura-frente.png') });
+      await pagina.uncheck('#mostrar-pintura');
+      coresP = await coresNaTela(pagina);
+      confere(!coresP.includes(AZUL) && !coresP.includes(BEGE) && coresP.includes(BRANCO), '"Mostrar pintura" desligado: só a cor das peças', coresP.join(' '));
+      await pagina.keyboard.press('p');
+      coresP = await coresNaTela(pagina);
+      confere(coresP.includes(AZUL) && await pagina.isChecked('#mostrar-pintura'), 'tecla P mostra a pintura de novo');
+      await pagina.selectOption('#pintura-de', '3');
+      await pagina.selectOption('#pintura-para', '1');
+      await pagina.selectOption('#pintura-onde', '');
+      await pagina.click('#pintura-trocar');
+      coresP = await coresNaTela(pagina);
+      e = await estado(pagina);
+      confere(coresP.includes(PRETO) && !coresP.includes(BEGE) && e.pintura.estados.join() === '1,2', 'trocar a cor bege pela preta no modelo todo', coresP.join(' '));
+      await pagina.click('[data-apagar-pintura="0"]');
+      await pagina.waitForSelector('#dialogo-confirmar[open]');
+      await pagina.click('#confirmar-sim');
+      e = await estado(pagina);
+      confere(!e.pintura.partes[0].pintada && e.pintura.partes[1].pintada, 'apagar a pintura do primeiro cubo (com confirmação)');
+      const baixadoP = await exportar(pagina, () => pagina.click('.painel [data-acao="exportar"]'));
+      const voltaP = await ler3mf(baixadoP.buffer, JSZip);
+      {
+        const c = voltaP.pinturaCor;
+        const p0 = voltaP.objetos[0].partes[0], p1 = voltaP.objetos[1].partes[0];
+        const usados = (p) => c.inicio[p.primeiroTriangulo + p.numTriangulos] - c.inicio[p.primeiroTriangulo];
+        const xml = await (await JSZip.loadAsync(baixadoP.buffer)).file('3D/3dmodel.model').async('string');
+        confere(usados(p0) === 0 && usados(p1) > 0 && xml.includes('paint_color="085"') && xml.includes('paint_color="400A"') && !xml.includes('paint_color="0C00A"'),
+          'exportado: primeiro cubo sem pintura, segundo com o canto trocado para o filamento 1');
+      }
+      await conferirXml(pagina, baixadoP.buffer, 'cubo de conferência exportado');
 
       // ---- 3MF ida e volta (etapa 1.2) ----
       await abrirModelo(pagina, arq.projeto);
@@ -326,12 +372,15 @@ async function principal() {
       confere(await pagina.locator('#lista-filamentos li').count() === 4, 'painel mostra os 4 filamentos');
       confere(await pagina.locator('#conteudo-modelo .placa').count() === 2, 'painel mostra as 2 placas');
       confere((await pagina.textContent('#conteudo-modelo')).includes('modificador'), 'parte modificadora aparece na lista');
+      // a pintura do projeto também usa essas cores: desligada aqui para olhar só as partes
+      await pagina.uncheck('#mostrar-pintura');
       let cores = await coresNaTela(pagina);
       confere(['#1A1A1A', '#1B2A6B', '#D9C49A'].every((c) => cores.includes(c)) && !cores.includes('#FFFFFF'), `cada parte na cor do filamento; a que não imprime fica apagada (${cores.join(' ')})`);
       await pagina.selectOption('.seletor-filamento[data-objeto="0"][data-parte="1"]', '4');
       const trocou = await pagina.evaluate(() => window.__fatiador.estado.malha.objetos[0].partes[1].extrusora);
       cores = await coresNaTela(pagina);
       confere(trocou === 4 && !cores.includes('#D9C49A'), 'trocar o filamento do olho muda a cor na tela', cores.join(' '));
+      await pagina.check('#mostrar-pintura');
       confere(!(await pagina.isDisabled('.painel [data-acao="exportar"]')), 'Exportar 3MF ligado com modelo');
       let baixado = await exportar(pagina, () => pagina.click('.painel [data-acao="exportar"]'));
       confere(baixado.nome === 'projeto-bambu_fatiador.3mf', `botão Exportar baixa "${baixado.nome}"`);
@@ -345,7 +394,7 @@ async function principal() {
         const v = window.__fatiador.visualizador;
         return { pos: v.peca.geometry.attributes.position.array.length, tri: v.trianguloNaTela, cores: v.coresNaTela().length };
       });
-      confere(e.objetos.length === 4 && naTela.pos > 0 && naTela.tri === e.triangulos && naTela.cores >= 3, 'depois de exportar o modelo continua aberto na tela', JSON.stringify(naTela));
+      confere(e.objetos.length === 4 && naTela.pos > 0 && naTela.tri === e.naTela + e.pedacosNaTela && naTela.cores >= 3, 'depois de exportar o modelo continua aberto na tela', JSON.stringify(naTela));
 
       // STL pelo atalho Ctrl+E: ganha miniatura e vai para o centro da placa
       await abrirModelo(pagina, arq.cubosObj);
@@ -465,6 +514,23 @@ async function principal() {
       confere(largura[0] <= largura[1], 'sem rolagem para o lado', JSON.stringify(largura));
       let pequenos = await alvosPequenos(pagina);
       confere(pequenos.length === 0, 'alvos de toque com 44 px ou mais', pequenos.join(', '));
+
+      await abrirModelo(pagina, arq.conferencia);
+      e = await estado(pagina);
+      let cores = await coresNaTela(pagina);
+      confere(e.pedacosNaTela > 500 && cores.includes('#1B2A6B') && cores.includes('#D9C49A'), `S23: pintura fina na tela (${e.pedacosNaTela} pedaços)`);
+      await pagina.locator('.barra-inferior [data-abre="painel-propriedades"]').tap();
+      await pagina.waitForTimeout(350);
+      await pagina.locator('#sec-modelo h3', { hasText: 'Pintura' }).scrollIntoViewIfNeeded();
+      pequenos = await alvosPequenos(pagina);
+      confere(pequenos.length === 0, 'controles da pintura com 44 px ou mais', pequenos.join(', '));
+      await pagina.locator('#mostrar-pintura').tap();
+      cores = await coresNaTela(pagina);
+      confere(!cores.includes('#1B2A6B'), 'S23: tocar em "Mostrar pintura" esconde a pintura');
+      await pagina.screenshot({ path: join(RESULTADOS, 's23-pintura.png') });
+      await pagina.locator('#mostrar-pintura').tap();
+      await pagina.locator('.barra-inferior [data-abre="painel-propriedades"]').tap();
+      await pagina.waitForTimeout(350);
 
       await abrirModelo(pagina, arq.projeto);
       const baixado = await exportar(pagina, () => pagina.locator('.barra-inferior [data-acao="exportar"]').tap());
@@ -590,12 +656,17 @@ async function principal() {
           const volta = await ler3mf(baixado.buffer, JSZip);
           let iguais = volta.indices.length === original.indices.length && volta.posicoes.length === original.posicoes.length;
           for (let i = 0; iguais && i < original.posicoes.length; i++) if (Math.abs(original.posicoes[i] - volta.posicoes[i]) > 1e-9) iguais = false;
-          const pinturaIgual = !original.pintura || Buffer.compare(Buffer.from(original.pintura.atributos), Buffer.from(volta.pintura.atributos)) === 0;
+          const mesmo = (a, b, campo) => (!a && !b) || (a && b && Buffer.compare(Buffer.from(a[campo]), Buffer.from(b[campo])) === 0
+            && a.inicio.every((v, i) => v === b.inicio[i]));
+          const pinturaIgual = mesmo(original.pinturaCor, volta.pinturaCor, 'codigos') && mesmo(original.pinturaOutros, volta.pinturaOutros, 'atributos');
           confere(iguais && pinturaIgual && volta.objetos.length === original.objetos.length
             && JSON.stringify(volta.placas.map((p) => p.objetos)) === JSON.stringify(original.placas.map((p) => p.objetos))
             && JSON.stringify(volta.objetos.map((o) => o.partes.map((p) => p.extrusora))) === JSON.stringify(original.objetos.map((o) => o.partes.map((p) => p.extrusora))),
           `${nome}: exportado e relido igual (${seg.toFixed(1)} s, ${(baixado.buffer.length / 1048576).toFixed(1)} MB, pintura ${volta.trianguloPintados} triângulos, ${depois.totalMB.toFixed(0)} MB em uso depois)`);
-          if (/smile/i.test(nome)) await conferirXml(pagina, baixado.buffer, nome);
+          if (/smile/i.test(nome)) {
+            await conferirXml(pagina, baixado.buffer, nome);
+            confere(e.pintura && e.pintura.pintados === 147643 && e.pintura.estados.join() === '2', `${nome}: pintura azul dos tênis lida (${e.pintura ? e.pintura.pintados : 0} triângulos)`);
+          }
         }
       }
       confere(erros.length === 0, 'sem erros no console', erros.join(' | '));

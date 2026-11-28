@@ -15,6 +15,7 @@ import { lerStl } from '../../js/io/stl.js';
 import { trocarFilamento, todasAsPartes, filamentoDaParte, aparenciaDasPartes } from '../../js/core/projeto.js';
 import { caixaDaMalha } from '../../js/core/malha.js';
 import { multiplicar } from '../../js/io/3mf.js';
+import { nibblesParaTexto } from '../../js/io/pintura-bambu.js';
 import { bambuProjeto3mf, PINTURAS_EXEMPLO, stlBinario, esfera } from '../gerar-modelos.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -52,10 +53,12 @@ function mesmaGeometria(a, b) {
 }
 
 function mesmaPintura(a, b) {
-  assert.equal(!!a.pintura, !!b.pintura);
-  if (!a.pintura) return;
-  assert.equal(Buffer.compare(Buffer.from(a.pintura.atributos), Buffer.from(b.pintura.atributos)), 0, 'pintura idêntica');
-  assert.ok(a.pintura.inicio.every((v, i) => v === b.pintura.inicio[i]), 'pintura no mesmo triângulo');
+  for (const [campo, dados] of [['pinturaOutros', 'atributos'], ['pinturaCor', 'codigos']]) {
+    assert.equal(!!a[campo], !!b[campo], campo);
+    if (!a[campo]) continue;
+    assert.equal(Buffer.compare(Buffer.from(a[campo][dados]), Buffer.from(b[campo][dados])), 0, `${campo} idêntica`);
+    assert.ok(a[campo].inicio.every((v, i) => v === b[campo].inicio[i]), `${campo} no mesmo triângulo`);
+  }
 }
 
 /** Toda aresta aparece exatamente 2 vezes em cada parte (malha fechada). */
@@ -90,14 +93,18 @@ test('lê o projeto do Bambu: objetos, partes, filamentos, placas e pintura', as
     { id: 1, nome: 'Frente', bloqueada: false, objetos: ['Boneco & olho', 'Etiqueta'] },
     { id: 2, nome: '', bloqueada: true, objetos: ['Peça espelhada', 'Peça espelhada'] },
   ]);
-  // pintura guardada como veio: 7 dos 12 triângulos do corpo + 6 da peça espelhada (×2 instâncias)
+  // pintura: 7 dos 12 triângulos do corpo + 6 da peça espelhada (×2 instâncias)
   assert.equal(PINTURAS_EXEMPLO.length, 5);
   assert.equal(m.trianguloPintados, 7 + 6 * 2);
   const t1 = m.objetos[0].partes[0].primeiroTriangulo + 1;
-  const txt = (t) => Buffer.from(m.pintura.atributos.subarray(m.pintura.inicio[t], m.pintura.inicio[t + 1])).toString();
-  assert.equal(txt(t1), ' paint_color="4"');
-  assert.equal(txt(t1 + 1), ' paint_color="0C" paint_supports="8"');
-  assert.equal(txt(t1 - 1), '');
+  const cor = (t) => nibblesParaTexto(m.pinturaCor.codigos, m.pinturaCor.inicio[t], m.pinturaCor.inicio[t + 1]);
+  const outros = (t) => Buffer.from(m.pinturaOutros.atributos.subarray(m.pinturaOutros.inicio[t], m.pinturaOutros.inicio[t + 1])).toString();
+  assert.equal(cor(t1), '4');
+  assert.equal(cor(t1 + 1), '0C');
+  assert.equal(outros(t1 + 1), ' paint_supports="8"');
+  assert.equal(cor(t1 + 2), '40C03C3');
+  assert.equal(cor(t1 - 1), '');
+  assert.equal(outros(t1 - 1), '');
   // arquivos guardados e descartados
   const extras = m.arquivo3mf.extras.map((e) => e.caminho).sort();
   assert.deepEqual(extras, ['Metadata/custom_gcode_per_layer.xml', 'Metadata/layer_config_ranges.xml', 'Metadata/plate_1.png', 'Metadata/project_settings.config']);

@@ -59,6 +59,7 @@ export class Visualizador {
     this.grupoModelo = new THREE.Group();
     this.cena.add(this.grupoModelo);
     this.peca = null;
+    this.detalhe = null; // pedaços reais da pintura fina (malha à parte)
     this.caixa = null;
     this.trianguloNaTela = 0;
     this.bytesGpu = 0;
@@ -129,6 +130,7 @@ export class Visualizador {
     this.luzChave.shadow.mapSize.set(2048, 2048);
     this.sombra.visible = sombras;
     if (this.peca) this.peca.castShadow = sombras;
+    if (this.detalhe) this.detalhe.castShadow = sombras;
     this.cena.traverse((o) => {
       if (o.material) o.material.needsUpdate = true;
     });
@@ -161,6 +163,7 @@ export class Visualizador {
       this.peca.geometry.dispose();
       this.peca = null;
     }
+    this._tirarDetalhe();
     this._descartarMateriais();
     this.caixa = null;
     this.trianguloNaTela = 0;
@@ -178,6 +181,7 @@ export class Visualizador {
       this.grupoModelo.remove(this.peca);
       this.peca.geometry.dispose();
     }
+    this._tirarDetalhe();
     const geo = new THREE.BufferGeometry();
     // A placa de vídeo só aceita precisão simples (o 3MF guarda em dupla).
     const pos = malhaTela.posicoes instanceof Float32Array ? malhaTela.posicoes : new Float32Array(malhaTela.posicoes);
@@ -195,7 +199,20 @@ export class Visualizador {
     this.trianguloNaTela = malhaTela.indices.length / 3;
     this.bytesGpu = pos.byteLength + malhaTela.indices.byteLength;
     this.bytesCopia = pos === malhaTela.posicoes ? 0 : pos.byteLength;
-    if (aparencia) this.colorir(aparencia.faixas, aparencia.partes);
+    if (malhaTela.detalhe && malhaTela.detalhe.posicoes.length) {
+      const d = malhaTela.detalhe;
+      const gd = new THREE.BufferGeometry();
+      gd.setAttribute('position', new THREE.BufferAttribute(d.posicoes, 3));
+      gd.boundingBox = geo.boundingBox.clone();
+      gd.boundingSphere = geo.boundingSphere.clone();
+      this.detalhe = new THREE.Mesh(gd, this._material(COR_PECA));
+      this.detalhe.castShadow = !!this.perfil.sombras;
+      this.detalhe.name = 'pintura-fina';
+      this.grupoModelo.add(this.detalhe);
+      this.trianguloNaTela += d.posicoes.length / 9;
+      this.bytesGpu += d.posicoes.byteLength;
+    }
+    if (aparencia) this.colorir(aparencia.faixas, aparencia.partes, aparencia.detalhe);
     this._ajustarSombra();
     if (enquadrarDepois) this.enquadrar('iso');
     else this.desenhar();
@@ -207,9 +224,22 @@ export class Visualizador {
    * @param {{primeiroTriangulo:number, numTriangulos:number}[]} faixas
    * @param {{cor:string, fantasma?:boolean, apagado?:boolean}[]} partes
    */
-  colorir(faixas, partes) {
+  colorir(faixas, partes, detalhe = null) {
     if (!this.peca) return;
-    const geo = this.peca.geometry;
+    if (this.detalhe && detalhe) this._colorirMalha(this.detalhe, detalhe.faixas, detalhe.partes);
+    this._colorirMalha(this.peca, faixas, partes);
+    this.desenhar();
+  }
+
+  _tirarDetalhe() {
+    if (!this.detalhe) return;
+    this.grupoModelo.remove(this.detalhe);
+    this.detalhe.geometry.dispose();
+    this.detalhe = null;
+  }
+
+  _colorirMalha(malha3d, faixas, partes) {
+    const geo = malha3d.geometry;
     geo.clearGroups();
     const materiais = [];
     const indiceDe = new Map();
@@ -230,8 +260,7 @@ export class Visualizador {
         atual = geo.groups[geo.groups.length - 1];
       }
     });
-    this.peca.material = materiais.length ? materiais : this._material(COR_PECA);
-    this.desenhar();
+    malha3d.material = materiais.length ? materiais : this._material(COR_PECA);
   }
 
   /** Material por cor, guardado para reaproveitar. */
@@ -275,13 +304,17 @@ export class Visualizador {
   /** Cores das partes na tela (para os testes): [{ cor, triangulos }]. */
   coresNaTela() {
     if (!this.peca) return [];
-    const mats = Array.isArray(this.peca.material) ? this.peca.material : [this.peca.material];
-    const geo = this.peca.geometry;
-    const grupos = geo.groups.length ? geo.groups : [{ start: 0, count: geo.index.count, materialIndex: 0 }];
     const soma = new Map();
-    for (const g of grupos) {
-      const cor = `#${mats[g.materialIndex].color.getHexString().toUpperCase()}`;
-      soma.set(cor, (soma.get(cor) || 0) + g.count / 3);
+    for (const m of [this.peca, this.detalhe]) {
+      if (!m) continue;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      const geo = m.geometry;
+      const total = geo.index ? geo.index.count : geo.attributes.position.count;
+      const grupos = geo.groups.length ? geo.groups : [{ start: 0, count: total, materialIndex: 0 }];
+      for (const g of grupos) {
+        const cor = `#${mats[g.materialIndex].color.getHexString().toUpperCase()}`;
+        soma.set(cor, (soma.get(cor) || 0) + g.count / 3);
+      }
     }
     return [...soma].map(([cor, triangulos]) => ({ cor, triangulos }));
   }

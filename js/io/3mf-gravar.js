@@ -15,6 +15,7 @@ import { EscritorBytes } from './texto.js';
 import { escaparXml } from './xml-simples.js';
 import { GravadorZip } from './zip-gravar.js';
 import { multiplicar, determinante } from './3mf.js';
+import { nibblesParaHex } from './pintura-bambu.js';
 
 const NS_3MF = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 const NS_BAMBU = 'http://schemas.bambulab.com/package/2021';
@@ -169,7 +170,9 @@ function* gerarModelo(malha, plano, origem, aoTriangulos) {
   const fila = [];
   const w = new EscritorBytes((pedaco) => fila.push(pedaco));
   const pos = malha.posicoes, idx = malha.indices;
-  const pintura = malha.pintura;
+  const pintura = malha.pinturaOutros; // suporte e costura, como vieram
+  const cor = malha.pinturaCor; // pintura de cor (árvore em nibbles)
+  let hex = new Uint8Array(256);
   let mapa = null; // vértice da malha -> vértice da parte (só quando a parte não tem faixa própria)
 
   w.texto(`<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="${NS_3MF}" xmlns:BambuStudio="${NS_BAMBU}">\n`);
@@ -245,6 +248,16 @@ function* gerarModelo(malha, plano, origem, aoTriangulos) {
           const t = k / 3;
           const i0 = pintura.inicio[t], i1 = pintura.inicio[t + 1];
           if (i1 > i0) w.bytes(pintura.atributos.subarray(i0, i1));
+        }
+        if (cor) {
+          const t = k / 3;
+          const i0 = cor.inicio[t], i1 = cor.inicio[t + 1];
+          if (i1 > i0) {
+            if (i1 - i0 > hex.length) hex = new Uint8Array((i1 - i0) * 2);
+            w.texto(' paint_color="');
+            w.bytes(nibblesParaHex(cor.codigos, i0, i1, hex).subarray(0, i1 - i0));
+            w.texto('"');
+          }
         }
         w.texto('/>\n');
         if (++contados === 65536) { aoTriangulos(contados); contados = 0; }

@@ -25,4 +25,6 @@ three-mesh-bvh (MIT), manifold-3d (Apache 2.0), Clipper2 (Boost), polylabel (ISC
 
 O Bambu Studio (AGPL) foi usado só como programa, para fatiar e conferir os 3MF exportados; nenhum código dele está no app.
 
+A leitura e a gravação da pintura do Bambu (`js/io/pintura-bambu.js`, etapa 1.3) foram escritas do zero a partir do formato do arquivo (a árvore de subdivisão em hexadecimal). Nenhum código do Bambu Studio nem do PrusaSlicer (ambos AGPL) foi copiado.
+
 Ferramentas de referência como BumpMesh/stlTexturizer e three-slicer (AGPL) servem só de inspiração: nenhum código delas é copiado.

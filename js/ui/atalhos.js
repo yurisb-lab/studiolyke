@@ -1,5 +1,5 @@
 // Atalhos de teclado (computador). Os da seleção (W, L, B, G...) entram na etapa 1.5.
-//   Ctrl+O abrir · Ctrl+E exportar 3MF · F enquadrar · 0/1/3/7 vistas
+//   Ctrl+O abrir · Ctrl+E exportar 3MF · F enquadrar · 0/1/3/7 vistas · P mostrar/esconder a pintura
 
 export function ligarAtalhos(acoes) {
   document.addEventListener('keydown', (e) => {
@@ -19,6 +19,7 @@ export function ligarAtalhos(acoes) {
     if (ctrl || e.altKey) return;
     const mapa = {
       f: () => acoes.enquadrar(),
+      p: () => acoes.pintura && acoes.pintura(),
       1: () => acoes.vista('frente'),
       3: () => acoes.vista('lado'),
       7: () => acoes.vista('cima'),

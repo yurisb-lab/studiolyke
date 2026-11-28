@@ -97,7 +97,8 @@ test('simplificar ao abrir mantém partes, filamentos e placas; a pintura sai co
   assert.deepEqual(s.objetos.map((o) => o.partes.map((p) => [p.nome, p.extrusora])), m.objetos.map((o) => o.partes.map((p) => [p.nome, p.extrusora])));
   assert.deepEqual(s.placas, m.placas);
   assert.deepEqual(s.filamentos, m.filamentos);
-  assert.equal(s.pintura, null);
+  assert.equal(s.pinturaCor, null);
+  assert.equal(s.pinturaOutros, null);
   assert.ok(s.avisos.some((a) => a.includes('pintura do Bambu foi descartada')));
   for (const o of s.objetos) {
     assert.equal(o.numTriangulos, o.partes.reduce((t, p) => t + p.numTriangulos, 0));
