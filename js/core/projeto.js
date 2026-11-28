@@ -19,9 +19,14 @@
 //   }
 //   malha.filamentos = [{ cor: '#1A1A1A', tipo: 'PLA', perfil: 'Bambu PLA Basic @BBL A1' }]
 //   malha.placas     = [{ id, nome, bloqueada, objetos: [índices em malha.objetos], config }]
-//   malha.pintura    = { atributos: Uint8Array, inicio: Uint32Array } | null
-//                      Pintura do Bambu de cada triângulo, guardada como veio
-//                      (texto ` paint_color="…"`); decodificada só na etapa 1.3.
+//   malha.pinturaCor = { codigos: Uint8Array, inicio: Uint32Array, resumo } | null
+//                      Pintura de cor do Bambu: a árvore de subdivisão de cada
+//                      triângulo em nibbles (ver js/io/pintura-bambu.js). O
+//                      triângulo t usa codigos[inicio[t] .. inicio[t+1]); vazio = sem pintura.
+//                      resumo: ver js/core/pintura.js (áreas por cor, por parte).
+//   malha.pinturaOutros = { atributos: Uint8Array, inicio: Uint32Array } | null
+//                      Pintura de suporte e de costura, guardada como veio
+//                      (texto ` paint_supports="…"`), e volta igual.
 //   malha.arquivo3mf = { aplicacao, metadados, extras: [{ caminho, bytes }], ordemPreservada }
 
 export const IDENTIDADE = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
@@ -61,7 +66,8 @@ export function garantirEstrutura(malha) {
   if (!malha.placas || !malha.placas.length) {
     malha.placas = [{ id: 1, nome: '', bloqueada: false, objetos: malha.objetos.map((_, i) => i), config: [] }];
   }
-  if (malha.pintura === undefined) malha.pintura = null;
+  if (malha.pinturaCor === undefined) malha.pinturaCor = null;
+  if (malha.pinturaOutros === undefined) malha.pinturaOutros = null;
   if (!malha.arquivo3mf) malha.arquivo3mf = null;
   return malha;
 }
@@ -86,6 +92,8 @@ export function faixasDasPartes(malha) {
 /** Quantos filamentos o usuário pode escolher (no mínimo os 4 do AMS). */
 export function numFilamentos(malha) {
   let maior = Math.max(4, malha.filamentos ? malha.filamentos.length : 0);
+  const resumo = malha.pinturaCor && malha.pinturaCor.resumo;
+  if (resumo) maior = Math.max(maior, resumo.maiorEstado);
   for (const { parte, objeto } of todasAsPartes(malha)) maior = Math.max(maior, parte.extrusora || 0, objeto.extrusora || 0);
   return Math.min(maior, 32);
 }

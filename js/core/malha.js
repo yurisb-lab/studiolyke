@@ -150,8 +150,11 @@ export function numVertices(malha) {
 
 export function bytesDaMalha(malha) {
   if (!malha) return 0;
-  let b = malha.posicoes.byteLength + malha.indices.byteLength;
-  if (malha.pintura) b += malha.pintura.atributos.byteLength + malha.pintura.inicio.byteLength;
+  // (a tela com pintura pode usar as posições da própria malha: posicoes = null)
+  let b = (malha.posicoes ? malha.posicoes.byteLength : 0) + malha.indices.byteLength;
+  if (malha.pinturaOutros) b += malha.pinturaOutros.atributos.byteLength + malha.pinturaOutros.inicio.byteLength;
+  if (malha.pinturaCor) b += malha.pinturaCor.codigos.byteLength + malha.pinturaCor.inicio.byteLength;
+  if (malha.detalhe) b += malha.detalhe.posicoes.byteLength;
   if (malha.arquivo3mf) for (const e of malha.arquivo3mf.extras || []) b += e.bytes.byteLength;
   return b;
 }
@@ -212,10 +215,15 @@ export function transferiveis(...malhas) {
     if (!m) continue;
     juntar(m.posicoes);
     juntar(m.indices);
-    if (m.pintura) {
-      juntar(m.pintura.atributos);
-      juntar(m.pintura.inicio);
+    if (m.pinturaOutros) {
+      juntar(m.pinturaOutros.atributos);
+      juntar(m.pinturaOutros.inicio);
     }
+    if (m.pinturaCor) {
+      juntar(m.pinturaCor.codigos);
+      juntar(m.pinturaCor.inicio);
+    }
+    if (m.detalhe) juntar(m.detalhe.posicoes);
     if (m.arquivo3mf) for (const e of m.arquivo3mf.extras || []) juntar(e.bytes);
   }
   return lista;

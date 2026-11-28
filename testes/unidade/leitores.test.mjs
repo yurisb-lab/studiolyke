@@ -80,7 +80,8 @@ test('3MF estilo Bambu: componentes, transformações, espelho, nomes e pintura'
   assert.equal(m.objetos[0].numTriangulos, 12 + triOlho);
   assert.equal(m.objetos[1].nome, 'Peça espelhada');
   assert.equal(m.trianguloPintados, 6);
-  assert.ok(m.avisos.some((a) => a.includes('1.3')));
+  assert.equal(m.avisos.length, 0, 'pintura entendida: nenhum aviso');
+  assert.equal(m.pinturaCor.codigos.length, 6, 'seis triângulos com o código "8"');
   // o cubo foi para (128,128) na placa
   const corpo = m.indices.subarray(0, 36);
   let minX = Infinity;

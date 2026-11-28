@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
+import { nibblesParaTexto, pintarPorRegiao } from '../js/io/pintura-bambu.js';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 export const PASTA_GERADOS = join(aqui, 'gerados');
@@ -163,7 +164,8 @@ function malhaXmlPintada({ posicoes, indices }, pinturas) {
 }
 
 // Pinturas de exemplo (formato do Bambu: árvore de subdivisão em hexadecimal).
-export const PINTURAS_EXEMPLO = ['', ' paint_color="4"', ' paint_color="0C" paint_supports="8"', ' paint_color="3C30C0"', ''];
+// '40C03C3' = triângulo dividido em 4: pedaços nas cores 1, 3, 0 e 6.
+export const PINTURAS_EXEMPLO = ['', ' paint_color="4"', ' paint_color="0C" paint_supports="8"', ' paint_color="40C03C3"', ''];
 
 /**
  * Projeto completo do Bambu Studio para testar a ida e volta:
@@ -249,6 +251,108 @@ export async function bambuProjeto3mf() {
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
+// ---------- cubo de conferência da pintura ----------
+
+/** Cubo de lado L com 8 vértices e a ordem de cada triângulo conhecida (normais para fora). */
+export function cuboConferencia(L = 30) {
+  const posicoes = [0, 0, 0, L, 0, 0, L, L, 0, 0, L, 0, 0, 0, L, L, 0, L, L, L, L, 0, L, L];
+  // 0 (0,0,0) 1 (L,0,0) 2 (L,L,0) 3 (0,L,0) 4 (0,0,L) 5 (L,0,L) 6 (L,L,L) 7 (0,L,L)
+  const faces = {
+    baixo: [[0, 3, 2], [0, 2, 1]],
+    cima: [[4, 5, 6], [4, 6, 7]],
+    frente: [[0, 1, 5], [0, 5, 4]], // y = 0: (BL, BR, TR) e (BL, TR, TL)
+    tras: [[3, 7, 6], [3, 6, 2]],
+    esquerda: [[0, 4, 7], [0, 7, 3]],
+    direita: [[1, 2, 6], [1, 6, 5]],
+  };
+  const indices = Object.values(faces).flat().flat();
+  return { posicoes, indices, faces, L };
+}
+
+/** A letra F no topo do cubo (coordenadas do cubo, em mm): 2 = azul, 0 = sem pintura. */
+export function letraF(L) {
+  return (x, y) => {
+    const u = x / L, v = y / L;
+    const haste = u >= 0.25 && u <= 0.42 && v >= 0.15 && v <= 0.85;
+    const topo = u >= 0.25 && u <= 0.78 && v >= 0.68 && v <= 0.85;
+    const meio = u >= 0.25 && u <= 0.64 && v >= 0.44 && v <= 0.58;
+    return haste || topo || meio ? 2 : 0;
+  };
+}
+
+/** Código de pintura (texto do Bambu) de cada triângulo do cubo de conferência. */
+export function pinturasConferencia(cubo, profundidade = 7) {
+  const { posicoes: p, indices, L } = cubo;
+  const F = letraF(L);
+  const v = (i) => [p[i * 3], p[i * 3 + 1], p[i * 3 + 2]];
+  const codigos = [];
+  for (let t = 0; t < indices.length; t += 3) codigos.push('');
+  // topo (triângulos 2 e 3): a letra F, com a pintura fina do Bambu
+  for (const t of [2, 3]) {
+    const [a, b, c] = indices.slice(t * 3, t * 3 + 3).map(v);
+    codigos[t] = nibblesParaTexto(Uint8Array.from(pintarPorRegiao(a, b, c, (x, y) => F(x, y), profundidade, 4)));
+  }
+  // frente: 1 lado dividido (triângulo azul apoiado na borda de baixo, ponta no centro)
+  codigos[4] = '085';
+  // frente: 2 lados divididos (triangulinho bege no canto de cima à esquerda)
+  codigos[5] = '0C00A';
+  return codigos;
+}
+
+/**
+ * 3MF para conferir a pintura no Bambu Studio: dois cubos brancos de 30 mm.
+ * Cubo da esquerda: F azul em cima (legível de cima, com a frente virada para você);
+ * na frente, triângulo azul na borda de baixo com a ponta no centro e triangulinho
+ * bege no canto de cima à esquerda. Cubo da direita: o mesmo, espelhado.
+ */
+export async function conferenciaPintura3mf() {
+  const cubo = cuboConferencia(30);
+  const codigos = pinturasConferencia(cubo);
+  const { posicoes, indices } = cubo;
+  let malhaTxt = '<mesh><vertices>';
+  for (let i = 0; i < posicoes.length; i += 3) malhaTxt += `<vertex x="${posicoes[i]}" y="${posicoes[i + 1]}" z="${posicoes[i + 2]}"/>`;
+  malhaTxt += '</vertices><triangles>';
+  for (let t = 0; t < indices.length; t += 3) {
+    const c = codigos[t / 3];
+    malhaTxt += `<triangle v1="${indices[t]}" v2="${indices[t + 1]}" v3="${indices[t + 2]}"${c ? ` paint_color="${c}"` : ''}/>`;
+  }
+  malhaTxt += '</triangles></mesh>';
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="config" ContentType="text/xml"/></Types>');
+  zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>');
+  zip.file('3D/3dmodel.model', `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">
+ <metadata name="Application">BambuStudio-02.08.02.61</metadata>
+ <metadata name="BambuStudio:3mfVersion">1</metadata>
+ <resources>
+  <object id="1" type="model">${malhaTxt}</object>
+  <object id="2" type="model"><components><component objectid="1" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></components></object>
+  <object id="3" type="model">${malhaTxt}</object>
+  <object id="4" type="model"><components><component objectid="3" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></components></object>
+ </resources>
+ <build>
+  <item objectid="2" transform="1 0 0 0 1 0 0 0 1 70 113 0" printable="1"/>
+  <item objectid="4" transform="-1 0 0 0 1 0 0 0 1 186 113 0" printable="1"/>
+ </build>
+</model>`);
+  const meta = (k, v) => `<metadata key="${k}" value="${v}"/>`;
+  const obj = (id, parte, nome) => `<object id="${id}">${meta('name', nome)}${meta('extruder', '4')}<part id="${parte}" subtype="normal_part">${meta('name', nome)}${meta('matrix', '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')}${meta('extruder', '4')}</part></object>`;
+  zip.file('Metadata/model_settings.config', `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  ${obj(2, 1, 'Cubo F')}
+  ${obj(4, 3, 'Cubo F espelhado')}
+  <plate>${meta('plater_id', '1')}${meta('plater_name', 'Conferência da pintura')}${meta('locked', 'false')}<model_instance>${meta('object_id', '2')}${meta('instance_id', '0')}${meta('identify_id', '100')}</model_instance><model_instance>${meta('object_id', '4')}${meta('instance_id', '0')}${meta('identify_id', '101')}</model_instance></plate>
+</config>`);
+  zip.file('Metadata/project_settings.config', JSON.stringify({
+    filament_colour: ['#1A1A1A', '#1B2A6B', '#D9C49A', '#FFFFFF'],
+    filament_type: ['PLA', 'PLA', 'PLA', 'PLA'],
+    filament_settings_id: ['eSUN PLA+ @BBL A1', 'eSUN PLA+ @BBL A1', 'eSUN PLA+ @BBL A1', 'eSUN PLA+ @BBL A1'],
+    filament_vendor: ['eSUN', 'eSUN', 'eSUN', 'eSUN'],
+    printer_model: 'Bambu Lab A1',
+  }, null, 4));
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
 /** Grava os arquivos de teste em testes/gerados/ (só se ainda não existem). */
 export async function gerarTodos({ pesado = true } = {}) {
   mkdirSync(PASTA_GERADOS, { recursive: true });
@@ -263,6 +367,7 @@ export async function gerarTodos({ pesado = true } = {}) {
     cubosObj: gravar('cubos.obj', objCubos()),
     bambu: gravar('boneco-bambu.3mf', await bambu3mf()),
     projeto: gravar('projeto-bambu.3mf', await bambuProjeto3mf()),
+    conferencia: gravar('conferencia-pintura.3mf', await conferenciaPintura3mf()),
   };
   if (pesado) {
     // ~1 milhão de triângulos, ~50 MB: o "modelo pesado" do modo leve

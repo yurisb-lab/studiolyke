@@ -1,5 +1,25 @@
 # Mudanças
 
+## v0.0.3 — Etapa 1.3: pintura do Bambu (28/11/2026)
+
+- **A pintura do Bambu aparece na tela**, nas cores dos filamentos. O que não está pintado fica na cor da parte.
+  - O app entende a "pintura fina" do Bambu: cada triângulo pintado com o pincel é dividido em pedaços menores, e a tela mostra esses pedaços de verdade. Por isso o contorno da pintura aparece certinho.
+  - Limite de pedaços na tela conforme o aparelho (metade do limite da tela: 150 mil no PC de 4 GB, 750 mil no S23 Ultra). Se passar disso, o resto aparece na cor que ocupa mais área de cada triângulo.
+  - Na malha leve da tela (modelos grandes), cada cor é simplificada separada e com a borda travada: o contorno não borra nem abre fresta.
+  - **"Mostrar pintura"** (chave no painel, tecla **P** no computador, menu de segurar) liga e desliga. A escolha fica salva.
+- **Painel "Pintura"**: cores usadas e a área de cada uma em cm²; em cada parte, as cores pintadas nela. Aviso se a pintura usa um filamento que o projeto não tem ou passa dos 4 do AMS.
+- **Edição simples da pintura** (pincel e balde ficam para a fase 3):
+  - **Trocar uma cor por outra** (ou por "sem pintura"), no modelo todo ou numa parte.
+  - **Apagar a pintura de uma parte**, com confirmação (o desfazer chega na etapa 1.4).
+  - Pedaços que ficam todos da mesma cor são juntados, como o Bambu faz.
+- **Exportar**: a pintura é regravada no formato do Bambu. Sem edição, sai **igual letra por letra** (conferido nos 147.643 triângulos pintados do smile). A pintura de suporte e de costura continua indo como veio. Pintura que o app não entende (arquivo estranho) não aparece na tela, mas volta igual.
+- Peças espelhadas: a pintura fina fica no lugar certo (a ordem dos vértices é desfeita antes de montar os pedaços).
+- O smile: a pintura está nos **dois tênis** (brancos, filamento 4) com o azul do filamento 2. Agora ela aparece.
+- **Arquivo de conferência** `testes/modelos/conferencia_pintura.3mf`, para abrir no Bambu Studio e comparar com o app (ver `testes/modelos/LEIA-ME.md`).
+- Corrigido: clicar em qualquer lugar do painel da direita podia ligar o modo leve sem querer.
+- Painel: "Na tela" agora diz se é a malha completa ou a leve, e quantos pedaços da pintura fina aparecem.
+- Testes automáticos novos (`testes/unidade/pintura.test.mjs`): formato da pintura, pedaços de 1, 2 e 3 lados divididos, 300 árvores sorteadas (as áreas fecham e os pedaços ficam dentro do triângulo), trocar e apagar cores, smile ida e volta letra por letra, cubo de conferência (pedaços na cor certa também na peça espelhada), malha da tela por cor. No navegador: pintura na tela, chave e tecla P, trocar cor, apagar com confirmação, exportar e reler, no PC de 4 GB e no S23 Ultra.
+
 ## v0.0.2 — Etapa 1.2: 3MF ida e volta (27/11/2026)
 
 - **Lê tudo o que o Bambu Studio guarda no 3MF:** objetos e as partes de cada um (com nome, tipo e posição), filamentos do projeto (cor, tipo, perfil), filamento de cada objeto e de cada parte, placas (nome, travada, objetos de cada uma), ajustes por objeto e por parte (brim, suporte, paredes…), configurações do projeto e miniaturas.

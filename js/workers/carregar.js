@@ -9,7 +9,8 @@ import { ler3mf } from '../io/3mf.js';
 import { gravar3mf } from '../io/3mf-gravar.js';
 import { garantirEstrutura } from '../core/projeto.js';
 import { caixaDaMalha, caixasDosObjetos, transferiveis } from '../core/malha.js';
-import { malhaDaTela, simplificarMalha } from '../core/simplificar.js';
+import { simplificarMalha } from '../core/simplificar.js';
+import { prepararTela, atualizarResumo } from '../core/pintura.js';
 
 let meshopt = null;
 async function obterMeshopt() {
@@ -56,6 +57,10 @@ async function abrir(id, { arquivo, limiteTela, simplificarPara }) {
     avisar(id, 'Simplificando o modelo…', 0);
     malha = simplificarMalha(await obterMeshopt(), malha, simplificarPara);
   }
+  if (malha.pinturaCor) {
+    avisar(id, 'Lendo a pintura…', 0);
+    atualizarResumo(malha);
+  }
   const tela = await gerarTela(id, malha, limiteTela);
   malha.nome = nome;
   malha.trianguloOriginal = trianguloOriginal;
@@ -65,9 +70,11 @@ async function abrir(id, { arquivo, limiteTela, simplificarPara }) {
 }
 
 async function gerarTela(id, malha, limiteTela) {
-  if (malha.indices.length / 3 <= limiteTela) return null; // a tela usa a própria malha
-  avisar(id, 'Preparando a malha leve da tela…', 0);
-  return malhaDaTela(await obterMeshopt(), malha, limiteTela);
+  const precisaSimplificar = malha.indices.length / 3 > limiteTela;
+  // sem pintura e abaixo do limite: a tela usa a própria malha
+  if (!precisaSimplificar && !malha.pinturaCor) return null;
+  avisar(id, malha.pinturaCor ? 'Preparando a pintura na tela…' : 'Preparando a malha leve da tela…', 0);
+  return prepararTela(precisaSimplificar ? await obterMeshopt() : null, malha, limiteTela);
 }
 
 /** Recebe a malha emprestada (transferida), gera a tela e devolve as duas. */

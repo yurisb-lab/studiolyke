@@ -276,7 +276,7 @@ A implementação anda em etapas pequenas, cada uma com uma entrega testável no
 
 1. **Esqueleto e modo leve:** página, visualizador, abrir STL/OBJ/3MF, malha leve na tela, medidor de memória, layout responsivo e gestos de toque. Pronto quando: o arco e o smile abrem no seu PC sem travar. — ✅ **Feita na v0.0.1** (27/11/2026). Testes automáticos passando, inclusive abrindo o arco (1,1 milhão de triângulos, ~1,6 s) e o smile (553 mil, ~1 s) no perfil do PC de 4 GB; falta a confirmação do Yuri no PC e no S23 Ultra de verdade.
 2. **3MF ida e volta:** ler objetos, partes e filamentos; exportar no formato do Bambu Studio. Pronto quando: um 3MF reaberto no Bambu fica igual ao original. — ✅ **Feita na v0.0.2** (27/11/2026). Lê objetos, partes, filamentos, placas, ajustes e configurações do projeto; cada parte aparece na cor do filamento, que pode ser trocado na lista; exporta no formato do Bambu (botão, Ctrl+E, barra do celular). A pintura do Bambu já é guardada e regravada igual (ainda sem aparecer na tela). Conferido no Bambu Studio 02.08.02.61 (linha de comando): o smile e o arco exportados dão os mesmos gramas por filamento e por placa que os originais. Falta a confirmação do Yuri no PC e no S23 Ultra.
-3. **Pintura do Bambu:** decodificar e regravar a pintura fina. Pronto quando: o smile vai e volta sem perder nenhuma cor.
+3. **Pintura do Bambu:** decodificar e regravar a pintura fina. Pronto quando: o smile vai e volta sem perder nenhuma cor. — ✅ **Feita na v0.0.3** (28/11/2026). A pintura aparece na tela com os pedaços reais da pintura fina, mostra a área por cor, troca e apaga cor; o smile volta igual letra por letra (147.643 triângulos pintados, nos dois tênis). O formato foi escrito do zero. Desta vez não deu para conferir no Bambu Studio da nuvem (download bloqueado): falta o Yuri abrir `testes/modelos/conferencia_pintura.3mf` no Bambu do PC e ver se o desenho bate com o do app, e testar no PC e no S23 Ultra.
 4. **Histórico:** operações editáveis, desfazer, salvar e abrir projeto, pela camada de armazenamento única (local agora, Google Drive depois).
 5. **Seleção:** varinha (cor, ângulo, casca), laço, só visível, ajustes, seleções salvas.
 6. **Corte básico:** clique e corte, por comando, caber na A1; partes deitam pela face cortada; pino simples; pôr de pé com medidor de estabilidade.
@@ -339,7 +339,7 @@ O maior risco é decodificar a pintura do Bambu; por isso ele é testado na fase
 **Testes de validação**
 
 - [ ] **Boneco smile azul e branco:** clicar no olho seleciona só o olho; o sorriso sai com o contorno exato; o corpo branco sai inteiro, só com o rebaixo.
-- [ ] **Ida e volta do 3MF:** abrir um 3MF pintado no app, exportar e reabrir no Bambu Studio sem perder nenhuma cor. *(v0.0.2: a pintura já volta igual, conferido fatiando o smile; falta mostrar e editar a pintura na etapa 1.3 e o teste do Yuri no Bambu do PC.)*
+- [ ] **Ida e volta do 3MF:** abrir um 3MF pintado no app, exportar e reabrir no Bambu Studio sem perder nenhuma cor. *(v0.0.2: a pintura já volta igual, conferido fatiando o smile. v0.0.3: a pintura aparece na tela, dá para trocar e apagar cor, e volta letra por letra; falta o teste do Yuri no Bambu do PC, com o smile e o `conferencia_pintura.3mf`.)*
 - [ ] **Arco rendilhado:** dividir para caber na A1 com biscoitos em arco e montar com cola sem desalinhar.
 - [ ] **Teste de folga:** imprimir a placa de folgas de 0,10 a 0,30 mm e salvar o perfil do eSUN PLA+.
 - [ ] **Lote de chaveiros:** gerar 10 nomes numa placa e conferir preço e prova digital.
