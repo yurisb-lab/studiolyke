@@ -75,7 +75,7 @@ docs/PLANO.md
 
 ## Fluxo de trabalho
 
-1. Uma etapa do plano por sessão. Comece apresentando o plano da etapa e espere o OK antes de escrever código.
+1. Um bloco do plano por sessão (uma ou mais etapas pequenas que andam juntas; as pesadas, como corte e incrustação, sozinhas). Cada etapa mantém a própria versão, os próprios testes e o próprio commit; um PR só por bloco. Comece apresentando o plano do bloco e espere o OK antes de escrever código.
 2. Escreva testes automáticos em `testes/` (pode usar Node e npm **só para testes**, como devDependencies) e rode antes de terminar: abrir e exportar 3MF, malha fechada depois de cada corte, cores preservadas.
 3. Use os arquivos de `testes/modelos/` como referência (ex.: boneco smile pintado, arco rendilhado).
 4. Ao terminar: atualize `docs/PLANO.md` (marque a etapa), `CHANGELOG.md` e o número de versão mostrado no app (v0.1, v0.2…).

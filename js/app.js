@@ -4,9 +4,14 @@ import { VERSAO } from './config.js';
 import { medirCapacidade, perfilEmUso } from './core/capacidade.js';
 import { estimarAbertura, usoAtual, formatarMB, formatarTriangulos, extensao, FORMATOS, MB } from './core/memoria.js';
 import { bytesDaMalha, transferiveis } from './core/malha.js';
-import { aparenciaDasPartes, faixasDasPartes, trocarFilamento, corDoFilamento, todasAsPartes, rotuloFilamento } from './core/projeto.js';
-import { trocarCorDaPintura, trocarCorNaTela } from './core/pintura.js';
+import { aparenciaDasPartes, faixasDasPartes, corDoFilamento, todasAsPartes, rotuloFilamento, filamentoDaParte } from './core/projeto.js';
 import * as armazenamento from './core/armazenamento.js';
+import { Historico } from './core/historico.js';
+import { operacao } from './ops/index.js';
+import * as projetos from './core/projetos.js';
+import { gravarPacote } from './core/pacote.js';
+import { renderizarHistorico, lerEditor } from './ui/painel-historico.js';
+import { renderizarProjetos } from './ui/dialogo-projetos.js';
 import { executar } from './core/tarefas.js';
 import { Visualizador } from './ui/visualizador.js';
 import { ligarGestos } from './ui/gestos.js';
@@ -27,6 +32,13 @@ const estado = {
   ocupado: false,
   mostrarPintura: true,
   limiteDaTela: 0, // limite de triângulos usado para montar a tela atual
+  versaoTela: 0, // muda sempre que a malha da tela é refeita
+  historico: null, // receitas das operações (js/core/historico.js)
+  arquivoBase: null, // o arquivo original (File/Blob, fica no disco, não na memória)
+  projeto: null, // registro do projeto (js/core/projetos.js)
+  guardandoBase: Promise.resolve(), // gravação do original no navegador
+  editando: null, // passo do histórico sendo editado
+  salvoEm: null,
 };
 
 let visualizador;
@@ -42,6 +54,10 @@ async function iniciar() {
   estado.mostrarPintura = await armazenamento.ler('preferencias', 'mostrarPintura', true);
   estado.perfil = perfilEmUso(estado.capacidade, estado.preferenciaLeve);
   document.documentElement.dataset.modoLeve = estado.perfil.modoLeve ? 'ligado' : 'desligado';
+  // Voltas rápidas do desfazer: limite de memória menor no modo leve.
+  estado.historico = new Historico(estado.perfil.modoLeve
+    ? { orcamentoVolta: 16 * MB, orcamentoSelecao: 16 * MB, maxSelecoes: 40 }
+    : { orcamentoVolta: 96 * MB, orcamentoSelecao: 64 * MB, maxSelecoes: 100 });
 
   visualizador = new Visualizador($('area-3d'), estado.perfil, {
     aoPerderContexto: () => avisar('A placa de vídeo pediu uma pausa. Se a peça sumir, recarregue a página.', 'aviso', 0),
@@ -55,10 +71,12 @@ async function iniciar() {
     { texto: 'Vista de lado', acao: () => visualizador.enquadrar('lado') },
     { texto: 'Vista 3D', acao: () => visualizador.enquadrar('iso') },
     '-',
+    ...(estado.historico.podeDesfazer ? [{ texto: 'Desfazer', acao: desfazer }] : []),
+    ...(estado.historico.podeRefazer ? [{ texto: 'Refazer', acao: refazer }] : []),
     { texto: estado.perfil.modoLeve ? 'Desligar o modo leve' : 'Ligar o modo leve', acao: () => mudarModoLeve(estado.perfil.modoLeve ? 'desligado' : 'ligado') },
     ...(temPintura() ? [{ texto: estado.mostrarPintura ? 'Esconder a pintura' : 'Mostrar a pintura', acao: () => mudarMostrarPintura(!estado.mostrarPintura) }] : []),
     { texto: 'Abrir modelo…', acao: escolherArquivo },
-    ...(estado.malha ? [{ texto: 'Exportar 3MF', acao: exportar3mf }] : []),
+    ...(estado.malha ? [{ texto: 'Exportar 3MF', acao: exportar3mf }, { texto: 'Salvar projeto', acao: salvarProjetoAgora }] : []),
   ]);
 
   ligarGestos(visualizador.renderer.domElement, {
@@ -75,6 +93,9 @@ async function iniciar() {
     enquadrar: () => visualizador.enquadrar(),
     vista: (v) => visualizador.enquadrar(v),
     pintura: () => { if (temPintura()) mudarMostrarPintura(!estado.mostrarPintura); },
+    desfazer,
+    refazer,
+    salvar: salvarProjetoAgora,
   });
 
   ligarBotoes();
@@ -91,14 +112,21 @@ async function iniciar() {
   registrarServiceWorker();
 
   // Para os testes automáticos e para diagnóstico no console.
-  window.__fatiador = { estado, visualizador, abrirArquivo, mudarModoLeve, exportar3mf, mudarMostrarPintura, trocarPintura, versao: VERSAO };
+  window.__fatiador = {
+    estado, visualizador, abrirArquivo, mudarModoLeve, exportar3mf, mudarMostrarPintura, trocarPintura,
+    mudarFilamento, desfazer, refazer, irPara, salvarAgora, versao: VERSAO,
+  };
   document.documentElement.dataset.pronto = 'sim';
+
+  // Pontos de restauração só valem enquanto o app está aberto.
+  projetos.apagarTodosOsPontos().catch(() => {});
+  await oferecerContinuar();
 }
 
 function ligarBotoes() {
   const entrada = $('entrada-arquivo');
   // No celular o filtro por extensão às vezes esconde o .3mf; lá deixamos sem filtro.
-  if (!window.matchMedia('(pointer: coarse)').matches) entrada.accept = '.stl,.obj,.3mf';
+  if (!window.matchMedia('(pointer: coarse)').matches) entrada.accept = '.stl,.obj,.3mf,.lyke';
   entrada.addEventListener('change', () => {
     const arquivo = entrada.files && entrada.files[0];
     entrada.value = '';
@@ -109,6 +137,11 @@ function ligarBotoes() {
       const acao = b.dataset.acao;
       if (acao === 'abrir') escolherArquivo();
       else if (acao === 'exportar') exportar3mf();
+      else if (acao === 'desfazer') desfazer();
+      else if (acao === 'refazer') refazer();
+      else if (acao === 'salvar-projeto') salvarProjetoAgora();
+      else if (acao === 'projetos') abrirListaProjetos();
+      else if (acao === 'baixar-projeto') baixarProjetoAtual();
       else if (acao === 'enquadrar') visualizador.enquadrar();
       else if (acao.startsWith('vista-')) visualizador.enquadrar(acao.slice(6));
       if (modoGaveta() && b.closest('.painel')) paineis.fechar();
@@ -136,6 +169,8 @@ function ligarBotoes() {
     const apagar = e.target.closest('[data-apagar-pintura]');
     if (apagar) apagarPinturaDaParte(Number(apagar.dataset.apagarPintura));
   });
+  ligarHistorico();
+  ligarProjetos();
   $('chip-modo-leve').addEventListener('click', () => mudarModoLeve(estado.perfil.modoLeve ? 'desligado' : 'ligado'));
   $('medidor').addEventListener('click', () => {
     if (modoGaveta()) paineis.abrir('painel-propriedades');
@@ -181,52 +216,110 @@ async function abrirArquivo(arquivo) {
     return;
   }
   const ext = extensao(arquivo.name);
-  if (!FORMATOS.includes(ext)) {
-    avisar(`O arquivo "${arquivo.name}" não é STL, OBJ nem 3MF.`, 'erro');
+  if (!FORMATOS.includes(ext) && ext !== 'lyke') {
+    avisar(`O arquivo "${arquivo.name}" não é STL, OBJ, 3MF nem projeto .lyke.`, 'erro');
     return;
   }
-  const est = await estimarAbertura(arquivo);
   let simplificarPara = null;
-  if (est.picoMB > estado.perfil.orcamentoMB) {
-    const escolha = await perguntarModeloGrande(arquivo, est);
-    if (escolha === 'cancelar') return;
-    if (escolha === 'simplificar') simplificarPara = alvoSimplificacao();
+  if (ext !== 'lyke') {
+    const est = await estimarAbertura(arquivo);
+    if (est.picoMB > estado.perfil.orcamentoMB) {
+      const escolha = await perguntarModeloGrande(arquivo, est);
+      if (escolha === 'cancelar') return;
+      if (escolha === 'simplificar') simplificarPara = alvoSimplificacao();
+    }
   }
+  await guardarTrabalhoAnterior();
+  const t0 = performance.now();
+  const r = await carregar({ arquivo, simplificarPara, novo: true, texto: ext === 'lyke' ? 'Abrindo o projeto…' : 'Abrindo…' });
+  if (!r) return;
+  const s = ((performance.now() - t0) / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  estado.historico.limpar();
+  estado.editando = null;
+  if (r.projeto) {
+    // projeto .lyke: o worker já refez as receitas
+    const modelo = r.modelo;
+    estado.arquivoBase = modelo;
+    estado.historico.carregar(r.projeto);
+    estado.historico.depoisDeReabrir(estado.historico.receitasAte().passos, r);
+    estado.projeto = {
+      ...projetos.novoRegistro({ nome: r.projeto.nome, base: { nome: modelo.name, tamanho: modelo.size, simplificarPara: r.projeto.base && r.projeto.base.simplificarPara } }),
+      selecoes: r.projeto.selecoes || [],
+      selecaoAtual: r.projeto.selecaoAtual || null,
+      criado: r.projeto.criado || Date.now(),
+    };
+    guardarBase(modelo); // (a vista do outro aparelho não serve aqui: a peça é enquadrada)
+    avisarFalhas(r.falhas);
+    avisar(`Projeto "${r.projeto.nome}" aberto em ${s} s (${estado.historico.passos.length} passos).`, 'ok');
+    // um .lyke aberto aqui vira projeto salvo neste navegador
+    estado.guardandoBase.then(() => salvarProjetoAgora({ silencioso: true }));
+  } else {
+    estado.arquivoBase = arquivo;
+    estado.projeto = projetos.novoRegistro({
+      nome: projetos.nomeDoArquivo(arquivo.name),
+      base: { nome: arquivo.name, tamanho: arquivo.size, simplificarPara },
+      versaoApp: VERSAO,
+    });
+    guardarBase(arquivo);
+    avisar(`${arquivo.name} aberto em ${s} s (${formatarTriangulos(r.malha.indices.length / 3)} triângulos).`);
+    for (const a of r.malha.avisos) avisar(a, 'aviso', 8000);
+  }
+  document.body.classList.add('com-modelo');
+  depoisDeMudar();
+}
 
+/**
+ * Abre um arquivo no worker (com receitas, se vierem) e põe na tela.
+ *   novo = modelo novo (limpa a tela e enquadra); senão é o histórico refazendo
+ *   (a câmera fica onde está).
+ * Devolve a resposta do worker, ou null se deu erro.
+ */
+async function carregar({ arquivo, simplificarPara = null, receitas = null, ponto = null, guardarVolta = false, novo = true, texto = 'Abrindo…' }) {
   estado.ocupado = true;
   // Libera o modelo anterior ANTES de abrir o novo (no PC de 4 GB isso faz diferença).
   estado.malha = null;
   estado.tela = null;
-  estado.caixa = null;
-  visualizador.limpar();
+  if (novo) {
+    estado.caixa = null;
+    visualizador.limpar();
+  }
   atualizarPaineis();
-  mostrarProgresso('Abrindo…', 0);
-  const t0 = performance.now();
+  mostrarProgresso(texto, 0);
   try {
     const r = await executar('abrir', {
       arquivo,
       limiteTela: estado.perfil.limiteTela,
       simplificarPara,
+      receitas,
+      ponto,
+      guardarVolta,
     }, [], mostrarProgresso);
     estado.malha = r.malha;
     estado.tela = r.tela;
     estado.caixa = r.caixa;
     estado.limiteDaTela = estado.perfil.limiteTela;
+    estado.versaoTela++;
     visualizador.mostrar(telaParaMostrar(), r.caixa, aparencia());
-    visualizador.enquadrar('iso');
-    const s = ((performance.now() - t0) / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-    avisar(`${arquivo.name} aberto em ${s} s (${formatarTriangulos(r.malha.indices.length / 3)} triângulos).`);
-    for (const a of r.malha.avisos) avisar(a, 'aviso', 8000);
-    document.body.classList.add('com-modelo');
+    if (novo) visualizador.enquadrar('iso');
+    return r;
   } catch (erro) {
     console.error(erro);
-    avisar(`Não consegui abrir "${arquivo.name}": ${erro.message}`, 'erro', 0);
+    if (novo) avisar(`Não consegui abrir "${arquivo.name}": ${erro.message}`, 'erro', 0);
+    else {
+      avisar(`Não consegui refazer os passos: ${erro.message}. Abra o modelo ou o projeto de novo.`, 'erro', 0);
+      visualizador.limpar();
+    }
+    return null;
   } finally {
     estado.ocupado = false;
     esconderProgresso();
     atualizarPaineis();
     atualizarMedidor();
   }
+}
+
+function avisarFalhas(falhas) {
+  for (const f of falhas || []) avisar(`Um passo do histórico não deu certo e foi pulado: ${f.mensagem}`, 'aviso', 8000);
 }
 
 function alvoSimplificacao() {
@@ -289,20 +382,24 @@ async function mudarModoLeve(preferencia) {
   }
 }
 
-/** Com outro limite de triângulos, a malha leve da tela é refeita a partir da completa. */
-async function refazerTelaSePreciso() {
+/**
+ * Com outro limite de triângulos, a malha leve da tela é refeita a partir da completa.
+ * forcar: refaz de qualquer jeito (o desfazer da pintura sem os estados da tela guardados).
+ */
+async function refazerTelaSePreciso(forcar = false) {
   const m = estado.malha;
   if (!m) return;
   const tri = m.indices.length / 3;
   const limite = estado.perfil.limiteTela;
   const naTela = estado.tela ? estado.tela.indices.length / 3 : tri;
   // com pintura a tela é sempre montada no worker (por cor); refaz se o limite mudou
-  const precisa = m.pinturaCor
+  const precisa = forcar || (m.pinturaCor
     ? estado.limiteDaTela !== limite
-    : (tri <= limite ? !!estado.tela : (naTela > limite * 1.15 || naTela < Math.min(tri, limite) * 0.6));
+    : (tri <= limite ? !!estado.tela : (naTela > limite * 1.15 || naTela < Math.min(tri, limite) * 0.6)));
   if (!precisa) return;
   if (tri <= limite && !m.pinturaCor) {
     estado.tela = null;
+    estado.versaoTela++;
     visualizador.mostrar(m, estado.caixa, aparencia());
     return;
   }
@@ -314,6 +411,7 @@ async function refazerTelaSePreciso() {
     estado.malha = r.malha;
     estado.tela = r.tela;
     estado.limiteDaTela = limite;
+    estado.versaoTela++;
     visualizador.mostrar(telaParaMostrar(), estado.caixa, aparencia());
   } catch (erro) {
     avisar(`Não consegui refazer a malha da tela: ${erro.message}. Abra o modelo de novo.`, 'erro', 0);
@@ -376,7 +474,7 @@ async function mudarMostrarPintura(mostrar) {
 
 /**
  * Troca uma cor da pintura por outra (para = 0 tira a pintura dessa cor), numa
- * parte ou no modelo todo. Nesta etapa é uma troca direta; entra no histórico na 1.4.
+ * parte ou no modelo todo. Entra no histórico (dá para desfazer e editar).
  */
 function trocarPintura({ de, para, parteIndice = null }) {
   const m = estado.malha;
@@ -385,20 +483,23 @@ function trocarPintura({ de, para, parteIndice = null }) {
     avisar('Escolha uma cor diferente para trocar.', 'aviso');
     return 0;
   }
-  let n;
+  const onde = parteIndice == null ? 'no modelo todo' : `em ${nomeDaParte(parteIndice)}`;
+  const resumo = m.pinturaCor.resumo;
+  const partesR = parteIndice == null ? resumo.partes : [resumo.partes[parteIndice]];
+  const tem = de === 'todas' ? partesR.some((p) => p && p.pintada) : partesR.some((p) => p && p.areas[de] > 0);
+  if (!tem) {
+    avisar(de === 'todas' ? `Não há pintura ${onde}.` : `A cor ${de} não aparece ${onde}.`, 'aviso');
+    return 0;
+  }
+  let r;
   try {
-    n = trocarCorDaPintura(m, { de, para, parteIndice });
+    r = aplicarOperacao('pintura-trocar', { de, para, parteIndice, nome: parteIndice == null ? null : nomeDaParte(parteIndice).replace(/"/g, '') });
   } catch (erro) {
     avisar(erro.message, 'erro');
     return 0;
   }
-  trocarCorNaTela(estado.tela, { de, para, parteIndice });
-  recolorir();
-  atualizarPaineis();
-  atualizarMedidor();
-  const onde = parteIndice == null ? 'no modelo todo' : `em ${nomeDaParte(parteIndice)}`;
-  if (de === 'todas') avisar(`Pintura apagada ${onde} (${n.toLocaleString('pt-BR')} triângulos).`, 'ok');
-  else if (!n) avisar(`A cor ${de} não aparece ${onde}.`, 'aviso');
+  const n = r.mudaram;
+  if (de === 'todas') avisar(`Pintura apagada ${onde} (${n.toLocaleString('pt-BR')} triângulos). Ctrl+Z desfaz.`, 'ok');
   else {
     const para2 = para === 0 ? 'sem pintura' : `filamento ${rotuloFilamento(m, para)}`;
     avisar(`Cor ${rotuloFilamento(m, de)} trocada por ${para2} ${onde} (${n.toLocaleString('pt-BR')} triângulos).`, 'ok');
@@ -414,14 +515,16 @@ function nomeDaParte(k) {
 
 async function apagarPinturaDaParte(k) {
   if (!estado.malha || estado.ocupado) return;
-  const ok = await confirmar(`Apagar toda a pintura de ${nomeDaParte(k)}? Ainda não dá para desfazer (o desfazer chega na próxima etapa).`, 'Apagar pintura');
+  const ok = await confirmar(`Apagar toda a pintura de ${nomeDaParte(k)}? Dá para desfazer depois (Ctrl+Z ou o Histórico).`, 'Apagar pintura');
   if (ok) trocarPintura({ de: 'todas', parteIndice: k });
 }
 
-function confirmar(texto, botao) {
+function confirmar(texto, botao, { titulo = 'Confirmar', nao = 'Cancelar' } = {}) {
   const dialogo = $('dialogo-confirmar');
+  $('confirmar-titulo').textContent = titulo;
   $('confirmar-texto').textContent = texto;
   $('confirmar-sim').textContent = botao;
+  $('confirmar-nao').textContent = nao;
   return new Promise((resolver) => {
     const responder = (v) => { dialogo.close(); resolver(v); };
     $('confirmar-sim').onclick = () => responder(true);
@@ -432,14 +535,20 @@ function confirmar(texto, botao) {
 }
 
 function mudarFilamento(io, ip, n) {
-  if (!estado.malha || estado.ocupado) return;
+  const m = estado.malha;
+  if (!m || estado.ocupado) return;
+  const o = m.objetos[io];
+  const p = o && o.partes[ip];
+  if (!p) return;
+  const de = filamentoDaParte(p, o);
+  if (de === n) return;
+  const nome = o.partes.length > 1 ? `${o.nome} › ${p.nome}` : o.nome;
   try {
-    trocarFilamento(estado.malha, io, ip, n);
+    aplicarOperacao('filamento', { objeto: io, parte: ip, filamento: n, de, nome });
   } catch (erro) {
     avisar(erro.message, 'erro');
+    atualizarPaineis();
   }
-  recolorir();
-  atualizarPaineis();
 }
 
 /** Nome do arquivo exportado: "boneco.3mf" vira "boneco_fatiador.3mf". */
@@ -460,7 +569,7 @@ async function exportar3mf() {
   estado.ocupado = true;
   atualizarBotoes();
   const m = estado.malha;
-  const nome = nomeExportado(m.nome);
+  const nome = nomeSeguro(nomeExportado(m.nome));
   mostrarProgresso('Preparando o 3MF…', 0);
   const t0 = performance.now();
   let miniatura = null;
@@ -504,13 +613,23 @@ async function exportar3mf() {
   }
 }
 
+/**
+ * Nome de arquivo sem acento nem caractere especial: alguns Chrome trocam um nome
+ * com "ê" por "download" (e o arquivo perde a extensão).
+ */
+export function nomeSeguro(nome) {
+  return String(nome || 'arquivo').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w.\-]+/g, '_').replace(/_+/g, '_').replace(/^_|_(?=\.)/g, '') || 'arquivo';
+}
+
 function baixar(blob, nome) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = nome;
+  a.download = nomeSeguro(nome);
   a.hidden = true;
-  document.body.append(a);
+  // com uma janela aberta, o resto da página fica "inerte": o link vai dentro dela
+  (document.querySelector('dialog[open]') || document.body).append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -518,12 +637,454 @@ function baixar(blob, nome) {
 
 function atualizarBotoes() {
   const pode = !!estado.malha && !estado.ocupado;
-  document.querySelectorAll('[data-acao="exportar"]').forEach((b) => { b.disabled = !pode; });
+  const h = estado.historico;
+  const liga = (acao, sim) => document.querySelectorAll(`[data-acao="${acao}"]`).forEach((b) => { b.disabled = !sim; });
+  liga('exportar', pode);
+  liga('salvar-projeto', pode);
+  liga('baixar-projeto', pode);
+  liga('desfazer', pode && h.podeDesfazer);
+  liga('refazer', pode && h.podeRefazer);
+  const ultimo = h.passos[h.posicao - 1];
+  const proximo = h.passos[h.posicao];
+  document.querySelectorAll('[data-acao="desfazer"]').forEach((b) => { b.title = ultimo ? `Desfazer: ${ultimo.rotulo} (Ctrl+Z)` : 'Desfazer (Ctrl+Z)'; });
+  document.querySelectorAll('[data-acao="refazer"]').forEach((b) => { b.title = proximo ? `Refazer: ${proximo.rotulo} (Ctrl+Y)` : 'Refazer (Ctrl+Y)'; });
+}
+
+// --- histórico ----------------------------------------------------------------
+
+/** Aplica uma operação nova (entra no histórico) e atualiza a tela. */
+function aplicarOperacao(tipo, params) {
+  const antes = fotoDaTela();
+  const { passo, resultado } = estado.historico.aplicarNovo(estado.malha, tipo, params);
+  passo.telaAntes = antes;
+  const op = operacao(tipo);
+  if (op.naTela && estado.tela) op.naTela(estado.tela, params);
+  estado.editando = null;
+  recolorir();
+  depoisDeMudar();
+  return resultado;
+}
+
+/** Cores (estados) das faixas da tela: guardadas para o desfazer não refazer a tela. */
+function fotoDaTela() {
+  const t = estado.tela;
+  if (!t || !t.faixas) return null;
+  return {
+    versao: estado.versaoTela,
+    faixas: t.faixas.map((f) => f.estado),
+    detalhe: t.detalhe ? t.detalhe.faixas.map((f) => f.estado) : null,
+  };
+}
+
+function restaurarTela(foto) {
+  const t = estado.tela;
+  if (!foto || !t || foto.versao !== estado.versaoTela || !t.faixas || t.faixas.length !== foto.faixas.length) return false;
+  t.faixas.forEach((f, i) => { f.estado = foto.faixas[i]; });
+  if (t.detalhe && foto.detalhe && t.detalhe.faixas.length === foto.detalhe.length) {
+    t.detalhe.faixas.forEach((f, i) => { f.estado = foto.detalhe[i]; });
+  }
+  return true;
+}
+
+function desfazer() {
+  if (estado.historico.podeDesfazer) return irPara(estado.historico.posicao - 1);
+  return null;
+}
+
+function refazer() {
+  if (estado.historico.podeRefazer) return irPara(estado.historico.posicao + 1);
+  return null;
+}
+
+/** Leva o modelo (e a seleção) até a posição "alvo" do histórico. */
+async function irPara(alvo) {
+  const h = estado.historico;
+  if (!estado.malha || estado.ocupado || alvo === h.posicao) return;
+  const plano = h.plano(alvo);
+  if (plano.reabrir) {
+    if (!(await reabrirAte(plano.alvo))) return;
+  } else {
+    let refazerATela = false;
+    for (const { passo, acao } of plano.passos) {
+      const op = operacao(passo.tipo);
+      try {
+        if (acao === 'desfazer') {
+          op.desfazer(estado.malha, passo.params, passo.volta);
+          if (op.naTela && estado.tela && !restaurarTela(passo.telaAntes)) refazerATela = true;
+          passo.volta = null; // no "refazer" a receita é aplicada de novo
+          passo.voltaBytes = 0;
+        } else {
+          const antes = fotoDaTela();
+          const r = op.aplicar(estado.malha, passo.params, { guardarVolta: true });
+          passo.volta = r.volta || null;
+          passo.voltaBytes = r.volta ? r.voltaBytes || 0 : 0;
+          passo.telaAntes = antes;
+          passo.erro = null;
+          if (op.naTela && estado.tela) op.naTela(estado.tela, passo.params);
+        }
+      } catch (erro) {
+        passo.erro = erro.message;
+        avisar(`O passo "${passo.rotulo}" não deu certo: ${erro.message}`, 'aviso', 8000);
+      }
+    }
+    if (refazerATela) await refazerTelaSePreciso(true);
+  }
+  h.irPara(plano.alvo);
+  recolorir();
+  depoisDeMudar();
+}
+
+/** Reabre o original (ou o ponto de restauração) e refaz as receitas até "alvo". */
+async function reabrirAte(alvo) {
+  if (!estado.arquivoBase) {
+    avisar('O arquivo original não está mais disponível. Abra o modelo de novo.', 'erro', 0);
+    return false;
+  }
+  const h = estado.historico;
+  const { ponto, receitas, passos } = h.receitasAte(alvo);
+  const r = await carregar({
+    arquivo: estado.arquivoBase,
+    simplificarPara: estado.projeto && estado.projeto.base.simplificarPara,
+    receitas,
+    ponto,
+    guardarVolta: true,
+    novo: false,
+    texto: 'Refazendo os passos…',
+  });
+  if (!r) return false;
+  h.depoisDeReabrir(passos, r);
+  avisarFalhas(r.falhas);
+  return true;
+}
+
+function ligarHistorico() {
+  const el = $('conteudo-historico');
+  el.addEventListener('click', async (e) => {
+    const editar = e.target.closest('[data-editar-passo]');
+    if (editar) {
+      const i = Number(editar.dataset.editarPasso);
+      estado.editando = estado.editando === i ? null : i;
+      renderizarHistorico(el, estado);
+      return;
+    }
+    if (e.target.closest('[data-cancelar-edicao]')) {
+      estado.editando = null;
+      renderizarHistorico(el, estado);
+      return;
+    }
+    if (e.target.closest('[data-aplicar-edicao]')) {
+      await aplicarEdicao(e.target.closest('.editor-passo'));
+      return;
+    }
+    const apagar = e.target.closest('[data-apagar-passo]');
+    if (apagar) {
+      await apagarPasso(Number(apagar.dataset.apagarPasso));
+      return;
+    }
+    const ir = e.target.closest('[data-ir]');
+    if (ir) {
+      await irPara(Number(ir.dataset.ir));
+      if (modoGaveta() && window.matchMedia('(max-width: 699px)').matches) paineis.fechar();
+    }
+  });
+}
+
+async function aplicarEdicao(form) {
+  const h = estado.historico;
+  const i = estado.editando;
+  const passo = h.passos[i];
+  if (!passo || estado.ocupado) return;
+  const params = lerEditor(form, passo);
+  const pontos = h.editar(i, params);
+  projetos.apagarPontos(pontos).catch(() => {});
+  estado.editando = null;
+  if (i < h.posicao) {
+    // o modelo é refeito pelas receitas, já com o passo editado
+    if (await reabrirAte(h.posicao)) avisar(`Passo ${i + 1} editado: ${passo.rotulo}.`, 'ok');
+  }
+  depoisDeMudar();
+}
+
+async function apagarPasso(i) {
+  const h = estado.historico;
+  const passo = h.passos[i];
+  if (!passo || estado.ocupado) return;
+  const noModelo = passo.tipo !== 'selecao' && i < h.posicao;
+  if (noModelo) {
+    const ok = await confirmar(`Apagar o passo ${i + 1} ("${passo.rotulo}")? O app refaz os passos seguintes sem ele.`, 'Apagar passo');
+    if (!ok) return;
+  }
+  const r = h.apagar(i);
+  projetos.apagarPontos(r.pontos).catch(() => {});
+  if (estado.editando != null) estado.editando = null;
+  if (noModelo) await reabrirAte(h.posicao);
+  depoisDeMudar();
+}
+
+/** Depois de qualquer mudança: painéis, botões e salvamento automático. */
+function depoisDeMudar() {
+  atualizarPaineis();
+  atualizarMedidor();
+  agendarSalvamento();
+}
+
+// --- projetos e salvamento automático -------------------------------------------
+
+let timerSalvar = 0;
+let avisouFalhaSalvar = false;
+
+function agendarSalvamento() {
+  if (!estado.projeto || !estado.malha) return;
+  clearTimeout(timerSalvar);
+  timerSalvar = setTimeout(() => { salvarAgora(); }, 700);
+}
+
+/** O registro do projeto como está agora (receitas, seleções, vista). */
+function montarRegistro() {
+  return {
+    ...estado.projeto,
+    ...estado.historico.paraSalvar(),
+    vista: visualizador.vista(),
+    versaoApp: VERSAO,
+    base: { ...estado.projeto.base },
+  };
+}
+
+/** Grava o rascunho (e o projeto, se ele já tem nome). */
+async function salvarAgora() {
+  clearTimeout(timerSalvar);
+  if (!estado.projeto || !estado.malha) return false;
+  try {
+    await estado.guardandoBase;
+    if (!estado.projeto.base.chaveArquivo) return false;
+    const r = montarRegistro();
+    await projetos.gravarRascunho(r);
+    if (r.id) await projetos.salvarProjeto(r);
+    estado.salvoEm = Date.now();
+    renderizarHistorico($('conteudo-historico'), estado);
+    return true;
+  } catch (erro) {
+    console.warn('Não salvou o trabalho', erro);
+    if (!avisouFalhaSalvar) {
+      avisouFalhaSalvar = true;
+      avisar('Não deu para guardar o trabalho no navegador (pode estar sem espaço). O desfazer continua funcionando.', 'aviso', 8000);
+    }
+    return false;
+  }
+}
+
+/** Guarda o arquivo original no navegador (para reabrir o projeto depois). */
+function guardarBase(arquivo) {
+  const projeto = estado.projeto;
+  estado.guardandoBase = projetos.guardarArquivo(arquivo)
+    .then((chave) => {
+      projeto.base.chaveArquivo = chave;
+      return projetos.gravarRascunho({ ...projeto, ...estado.historico.paraSalvar() });
+    })
+    .then(() => projetos.limparArquivos())
+    .catch((erro) => {
+      console.warn('Não guardou o original', erro);
+      avisar('Não deu para guardar o original no navegador (pode estar sem espaço). O desfazer funciona, mas o projeto não fica salvo.', 'aviso', 8000);
+    });
+  return estado.guardandoBase;
+}
+
+/** Antes de abrir outro modelo: trabalho sem nome com passos vira um projeto "não salvo". */
+async function guardarTrabalhoAnterior() {
+  if (!estado.projeto || !estado.malha) return;
+  try {
+    await salvarAgora();
+    if (!estado.projeto.id && estado.historico.numModelo > 0 && estado.projeto.base.chaveArquivo) {
+      await projetos.guardarAutomatico(montarRegistro());
+      avisar(`O trabalho em "${estado.projeto.nome}" ficou em Projetos salvos (não salvo).`, 'info', 6000);
+    }
+  } catch (erro) {
+    console.warn('Não guardou o trabalho anterior', erro);
+  }
+}
+
+async function salvarProjetoAgora({ silencioso = false } = {}) {
+  if (!estado.malha || !estado.projeto || estado.ocupado) return false;
+  if (!estado.projeto.id && !silencioso) {
+    const nome = await perguntarNome(estado.projeto.nome);
+    if (!nome) return false;
+    estado.projeto.nome = nome;
+  }
+  await estado.guardandoBase;
+  if (!estado.projeto.base.chaveArquivo) {
+    avisar('O original não ficou guardado no navegador; use "Baixar projeto (.lyke)".', 'erro', 8000);
+    return false;
+  }
+  try {
+    const salvo = await projetos.salvarProjeto({ ...montarRegistro(), auto: false });
+    estado.projeto.id = salvo.id;
+    estado.projeto.auto = false;
+    await projetos.gravarRascunho(montarRegistro());
+    estado.salvoEm = Date.now();
+    if (!silencioso) avisar(`Projeto "${estado.projeto.nome}" salvo neste navegador. Daqui em diante ele se salva sozinho.`, 'ok', 6000);
+    atualizarPaineis();
+    return true;
+  } catch (erro) {
+    avisar(`Não consegui salvar o projeto: ${erro.message}`, 'erro', 0);
+    return false;
+  }
+}
+
+function perguntarNome(atual) {
+  const dialogo = $('dialogo-nome');
+  const campo = $('nome-valor');
+  campo.value = atual || '';
+  return new Promise((resolver) => {
+    const responder = (v) => { dialogo.close(); resolver(v); };
+    $('form-nome').onsubmit = (e) => {
+      e.preventDefault();
+      const v = campo.value.trim();
+      if (v) responder(v);
+    };
+    $('nome-cancelar').onclick = () => responder(null);
+    dialogo.oncancel = (e) => { e.preventDefault(); responder(null); };
+    dialogo.showModal();
+    campo.select();
+  });
+}
+
+function ligarProjetos() {
+  $('projetos-fechar').addEventListener('click', () => $('dialogo-projetos').close());
+  $('lista-projetos').addEventListener('click', async (e) => {
+    const abrir = e.target.closest('[data-abrir-projeto]');
+    const baixar = e.target.closest('[data-baixar-projeto]');
+    const apagar = e.target.closest('[data-apagar-projeto]');
+    if (abrir) {
+      $('dialogo-projetos').close();
+      await abrirProjetoSalvo(abrir.dataset.abrirProjeto);
+    } else if (baixar) {
+      await baixarProjeto(baixar.dataset.baixarProjeto);
+    } else if (apagar) {
+      const id = apagar.dataset.apagarProjeto;
+      const r = await projetos.lerProjeto(id);
+      $('dialogo-projetos').close();
+      const ok = await confirmar(`Apagar o projeto "${r ? r.nome : ''}" deste navegador? Isso não dá para desfazer.`, 'Apagar projeto');
+      if (ok) {
+        await projetos.apagarProjeto(id);
+        if (estado.projeto && estado.projeto.id === id) estado.projeto.id = null;
+        avisar('Projeto apagado.', 'ok');
+        atualizarPaineis();
+      }
+      await abrirListaProjetos();
+    }
+  });
+}
+
+async function abrirListaProjetos() {
+  if (estado.ocupado) return;
+  await salvarAgora();
+  const lista = await projetos.listarProjetos();
+  renderizarProjetos($('lista-projetos'), lista, estado.projeto && estado.projeto.id);
+  const d = $('dialogo-projetos');
+  if (!d.open) d.showModal();
+  if (modoGaveta()) paineis.fechar();
+}
+
+async function abrirProjetoSalvo(id) {
+  const r = await projetos.lerProjeto(id);
+  if (!r) {
+    avisar('Este projeto não existe mais.', 'erro');
+    return;
+  }
+  await abrirRegistro(r);
+}
+
+/** Abre um registro (projeto salvo ou rascunho): original + receitas. */
+async function abrirRegistro(registro) {
+  if (estado.ocupado) return;
+  const blob = await projetos.lerArquivo(registro.base && registro.base.chaveArquivo);
+  if (!blob) {
+    avisar(`O modelo original de "${registro.nome}" não está mais no navegador.`, 'erro', 0);
+    return;
+  }
+  if (!estado.projeto || estado.projeto.id !== registro.id) await guardarTrabalhoAnterior();
+  const arquivo = blob instanceof File ? blob : new File([blob], registro.base.nome);
+  const h = estado.historico;
+  h.carregar(registro);
+  const { receitas, passos } = h.receitasAte();
+  const r = await carregar({
+    arquivo,
+    simplificarPara: registro.base.simplificarPara,
+    receitas,
+    guardarVolta: true,
+    novo: true,
+    texto: `Abrindo "${registro.nome}"…`,
+  });
+  if (!r) {
+    h.limpar();
+    atualizarPaineis();
+    return;
+  }
+  h.depoisDeReabrir(passos, r);
+  estado.arquivoBase = arquivo;
+  estado.projeto = { ...registro, passos: undefined, posicao: undefined };
+  estado.guardandoBase = Promise.resolve();
+  estado.editando = null;
+  if (registro.vista) visualizador.aplicarVista(registro.vista);
+  avisarFalhas(r.falhas);
+  avisar(`Projeto "${registro.nome}" aberto (${h.passos.length} passos).`, 'ok');
+  document.body.classList.add('com-modelo');
+  depoisDeMudar();
+}
+
+async function baixarProjetoAtual() {
+  if (!estado.malha || !estado.projeto || !estado.arquivoBase) return;
+  await baixarPacote(montarRegistro(), estado.arquivoBase);
+}
+
+async function baixarProjeto(id) {
+  const r = await projetos.lerProjeto(id);
+  const blob = r && await projetos.lerArquivo(r.base.chaveArquivo);
+  if (!blob) {
+    avisar('O modelo original deste projeto não está mais no navegador.', 'erro');
+    return;
+  }
+  await baixarPacote(r, blob);
+}
+
+async function baixarPacote(registro, modelo) {
+  try {
+    const pacote = await gravarPacote(registro, modelo);
+    const nome = nomeSeguro(`${projetos.nomeDoArquivo(registro.nome)}.lyke`);
+    baixar(pacote, nome);
+    estado.ultimoPacote = { nome, bytes: pacote.size };
+    avisar(`Pronto: ${nome}. Abra este arquivo no outro aparelho com "Abrir modelo".`, 'ok', 8000);
+  } catch (erro) {
+    avisar(`Não consegui montar o .lyke: ${erro.message}`, 'erro', 0);
+  }
+}
+
+/** Ao abrir o app: se ficou trabalho de antes, oferece continuar. */
+async function oferecerContinuar() {
+  let r;
+  try {
+    r = await projetos.lerRascunho();
+  } catch {
+    return;
+  }
+  if (!r || !r.base || !r.base.chaveArquivo) return;
+  if (!((r.passos && r.passos.length) || (r.selecoes && r.selecoes.length) || r.id)) return;
+  const blob = await projetos.lerArquivo(r.base.chaveArquivo);
+  if (!blob || estado.malha) return;
+  const quando = new Date(r.alterado).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const n = (r.passos || []).length;
+  const ok = await confirmar(
+    `"${r.nome}" (${r.base.nome}), com ${n} passo${n === 1 ? '' : 's'}, mexido em ${quando}.`,
+    'Continuar',
+    { titulo: 'Continuar de onde parou?', nao: 'Agora não' },
+  );
+  if (ok) await abrirRegistro(r);
 }
 
 // --- painéis e medidor --------------------------------------------------------
 
 function atualizarPaineis() {
+  renderizarHistorico($('conteudo-historico'), estado);
   renderizarModelo($('conteudo-modelo'), estado);
   renderizarAparelho($('conteudo-aparelho'), estado);
   const chip = $('chip-modo-leve');

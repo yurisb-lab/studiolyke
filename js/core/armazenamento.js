@@ -6,13 +6,16 @@
 //
 // Coleções previstas:
 //   preferencias        ajustes do app (ex.: modo leve)
-//   projetos            projetos salvos (etapa 1.4)
-//   pontos-restauracao  cópias de segurança do histórico (etapa 1.4)
+//   projetos            projetos salvos e o rascunho automático (js/core/projetos.js)
+//   arquivos            arquivos originais dos projetos (Blob), por chave
+//   pontos-restauracao  modelo pronto depois de uma operação pesada (histórico)
 //   perfis              perfis de folga, filamentos e preços
+//
+// Funciona também dentro dos Web Workers (o IndexedDB existe lá).
 
 const NOME_BANCO = 'fatiador-lyke';
-const VERSAO_BANCO = 1;
-const COLECOES = ['preferencias', 'projetos', 'pontos-restauracao', 'perfis'];
+const VERSAO_BANCO = 2;
+const COLECOES = ['preferencias', 'projetos', 'arquivos', 'pontos-restauracao', 'perfis'];
 
 function adaptadorIndexedDB() {
   let aberto = null;

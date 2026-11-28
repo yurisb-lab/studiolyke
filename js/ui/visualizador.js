@@ -422,6 +422,26 @@ export class Visualizador {
     this.desenhar();
   }
 
+  /** Posição da câmera (para guardar no projeto). */
+  vista() {
+    const p = this.camera.position, a = this.controles.target;
+    return { posicao: [p.x, p.y, p.z], alvo: [a.x, a.y, a.z] };
+  }
+
+  /** Volta a câmera para uma vista guardada (depois de mostrar a peça). */
+  aplicarVista(v) {
+    if (!v || !Array.isArray(v.posicao) || !Array.isArray(v.alvo)) return;
+    if (![...v.posicao, ...v.alvo].every(Number.isFinite)) return;
+    this.camera.position.set(...v.posicao);
+    this.controles.target.set(...v.alvo);
+    const dist = this.camera.position.distanceTo(this.controles.target);
+    this.camera.near = Math.max(0.05, dist / 500);
+    this.camera.far = dist * 40 + 2000;
+    this.camera.updateProjectionMatrix();
+    this.controles.update();
+    this.desenhar();
+  }
+
   infoGpu() {
     const i = this.renderer.info;
     return { geometrias: i.memory.geometries, chamadas: i.render.calls, triangulos: i.render.triangles };

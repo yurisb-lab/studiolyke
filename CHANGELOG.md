@@ -1,5 +1,30 @@
 # Mudanças
 
+## v0.0.4 — Etapa 1.4: histórico e projetos (28/11/2026)
+
+- **Desfazer e refazer**: botões no topo (computador e tablet) e na barra de baixo do celular, **Ctrl+Z** e **Ctrl+Y** (ou Ctrl+Shift+Z), e no menu de segurar. Vale para trocar filamento, trocar cor da pintura e apagar pintura.
+- **Painel "Histórico"** (no alto do painel da direita, ou em "Info" no celular): lista dos passos com a hora.
+  - Tocar num passo volta o modelo até ali; os passos de depois ficam riscados até você fazer outra coisa.
+  - **Editar** (lápis) muda a receita de um passo antigo, por exemplo o filamento escolhido ou a cor da troca. O app refaz os passos seguintes sozinho.
+  - **Apagar** (lixeira) tira um passo; o app refaz os outros sem ele.
+  - Se um passo não dá mais certo depois de uma edição, ele fica marcado em amarelo e é pulado.
+- **Como funciona por dentro (modo leve)**: o histórico guarda só a **receita** de cada passo, nunca cópias do modelo.
+  - Desfazer rápido: o passo guarda só o pedacinho que mudou (o filamento antigo; na pintura, os códigos antigos só dos triângulos que mudaram), com limite de memória (16 MB no modo leve).
+  - Acima do limite, ou depois de editar um passo, o app reabre o original e refaz as receitas, sem travar a tela.
+  - No smile: trocar a cor ~0,1 s; desfazer rápido ~0,3 s; desfazer reabrindo ~1,6 s. A pintura volta **igual letra por letra**.
+  - Pontos de restauração (o modelo pronto gravado no IndexedDB) já estão preparados para as operações pesadas, que chegam a partir do corte (1.6).
+- **Projetos** (painel da esquerda, seção "Projeto"):
+  - **Salvar projeto** (Ctrl+S) pede um nome e guarda no navegador o modelo original e os passos. Depois disso o projeto se salva sozinho a cada mudança.
+  - **Projetos salvos**: lista com Abrir, Baixar .lyke e Apagar.
+  - **Baixar projeto (.lyke)**: um arquivo só, com o original e os passos, para levar do PC para o celular ou guardar de backup. Abre pelo "Abrir modelo" (ou arrastando para a tela) e já entra na lista de projetos do aparelho.
+  - **Salvamento automático**: se a página fechar ou o aparelho travar, ao abrir o app de novo ele pergunta "Continuar de onde parou?". Dá para continuar desfazendo até o original.
+  - Abrir outro modelo com trabalho sem nome não perde nada: ele fica em "Projetos salvos" como "(não salvo)" (os 3 mais recentes).
+  - Tudo passa pela camada única de armazenamento: o Google Drive entra depois no mesmo lugar.
+- Corrigido: arquivos com acento no nome (ex.: "Tênis.3mf") podiam baixar com o nome "download". Agora o nome do arquivo baixado sai sem acento ("Tenis_fatiador.3mf").
+- Corrigido: no celular, ao soltar o dedo depois de segurar para abrir o menu, o item que ficava embaixo do dedo era escolhido sozinho.
+- Barra do celular: Abrir · Desfazer · Refazer · Ferramentas · Info · Exportar (o "Enquadrar" fica no painel de ferramentas e no menu de segurar).
+- Testes automáticos novos (`testes/unidade/historico.test.mjs`): desfazer e refazer na hora, smile voltando letra por letra, desfazer reabrindo o original, editar um passo antigo, passo que falha, seleções no histórico, pontos de restauração, projeto salvo, `.lyke` ida e volta. No navegador: botões e atalhos, editar passo, salvar com Ctrl+S, recarregar e continuar, lista de projetos, `.lyke` aberto no S23 Ultra, tempos no smile.
+
 ## v0.0.3 — Etapa 1.3: pintura do Bambu (28/11/2026)
 
 - **A pintura do Bambu aparece na tela**, nas cores dos filamentos. O que não está pintado fica na cor da parte.
